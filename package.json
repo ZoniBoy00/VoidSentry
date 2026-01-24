@@ -1,5 +1,5 @@
 {
-  "name": "banbot",
+  "name": "VoidSentry",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
@@ -8,7 +8,7 @@
   },
   "keywords": [],
   "author": "ZoniBoy00",
-  "license": "ISC",
+  "license": "MIT",
   "type": "commonjs",
   "dependencies": {
     "discord.js": "^14.25.1",
