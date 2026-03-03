@@ -1,12 +1,20 @@
 {
-  "name": "VoidSentry",
-  "version": "1.0.0",
-  "description": "",
+  "name": "voidsentry",
+  "version": "2.0.0",
+  "description": "VoidSentry — A high-performance Discord security bot for trapping and banning self-bots.",
   "main": "index.js",
   "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
+  "keywords": [
+    "discord",
+    "bot",
+    "security",
+    "ban",
+    "moderation"
+  ],
   "author": "ZoniBoy00",
   "license": "MIT",
   "type": "commonjs",
