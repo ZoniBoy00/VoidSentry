@@ -26,3 +26,6 @@ Thumbs.db
 # Project Assets (Include if you want to keep assets in repo, exclude if they are large/external)
 # assets/*.mp4
 # assets/*.gif
+
+# Data (ban history, etc.)
+data/

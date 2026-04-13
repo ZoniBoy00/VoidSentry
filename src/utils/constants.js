@@ -1,27 +1,44 @@
+/**
+ * Constants and configuration values.
+ * 
+ * Contains colors, paths, branding, and other static values
+ * used throughout the bot.
+ * 
+ * @module utils/constants
+ */
+
 const path = require('path');
 
-// Color palette
+/** Discord embed color palette */
 const COLORS = {
-    DANGER: 0xFF0000,
-    DARK: 0x2C2F33,
-    SUCCESS: 0x00FF7F,
-    WARNING: 0xFFA500,
-    INFO: 0x5865F2,
+    DANGER: 0xFF0000,   // Red for bans/errors
+    DARK: 0x2C2F33,     // Dark gray
+    SUCCESS: 0x00FF7F,  // Green for success
+    WARNING: 0xFFA500,  // Orange for warnings
+    INFO: 0x5865F2,     // Blurple for info
 };
 
-// Paths
+/** Asset paths */
 const ASSETS_DIR = path.join(__dirname, '..', '..', 'assets');
 const LOGO_PATH = path.join(ASSETS_DIR, 'logo.png');
 const LOGO_ATTACHMENT_NAME = 'logo.png';
 const LOGO_URL = `attachment://${LOGO_ATTACHMENT_NAME}`;
 
-// Branding
+/** Branding strings */
 const BRAND_NAME = 'VoidSentry';
 const BRAND_SECURITY = `${BRAND_NAME} Security`;
 const BRAND_LOGGING = `${BRAND_NAME} Logging`;
 
-// Ban reasons
-const BAN_REASON = 'Security Breach: Sent a message in a Bot Detection Channel.';
+/**
+ * Get ban reason from config.
+ * Loaded dynamically from environment at runtime.
+ * 
+ * @returns {string} Ban reason from config
+ */
+function getBanReason() {
+    const CONFIG = require('../config');
+    return CONFIG.BAN_REASON;
+}
 
 module.exports = {
     COLORS,
@@ -32,5 +49,5 @@ module.exports = {
     BRAND_NAME,
     BRAND_SECURITY,
     BRAND_LOGGING,
-    BAN_REASON,
+    getBanReason,
 };

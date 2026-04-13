@@ -1,13 +1,22 @@
+/**
+ * Ban notification embed for DM to banned user.
+ * 
+ * Sends a notification to the user before they are banned.
+ * This is a best-effort notification that fails silently if the user
+ * has DMs disabled.
+ * 
+ * @module embeds/banNotificationEmbed
+ */
+
 const { EmbedBuilder } = require('discord.js');
 const { COLORS, LOGO_URL, BRAND_SECURITY } = require('../utils/constants');
 
 /**
- * Creates an embed to DM to the user before banning them.
- * This is a best-effort notification — it will silently fail if the user has DMs disabled.
- *
- * @param {string} guildName - Name of the server
+ * Creates an embed to send to the user before banning.
+ * 
+ * @param {string} guildName - Name of the server where ban occurred
  * @param {string} reason - Ban reason
- * @returns {EmbedBuilder}
+ * @returns {import('discord.js').EmbedBuilder} Notification embed
  */
 function createBanNotificationEmbed(guildName, reason) {
     return new EmbedBuilder()

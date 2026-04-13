@@ -1,70 +1,70 @@
-const chalk = {
-    // ANSI color codes for terminal output
-    red: (text) => `\x1b[31m${text}\x1b[0m`,
-    green: (text) => `\x1b[32m${text}\x1b[0m`,
-    yellow: (text) => `\x1b[33m${text}\x1b[0m`,
-    blue: (text) => `\x1b[34m${text}\x1b[0m`,
-    magenta: (text) => `\x1b[35m${text}\x1b[0m`,
-    cyan: (text) => `\x1b[36m${text}\x1b[0m`,
-    gray: (text) => `\x1b[90m${text}\x1b[0m`,
-    bold: (text) => `\x1b[1m${text}\x1b[0m`,
-    bgRed: (text) => `\x1b[41m\x1b[37m${text}\x1b[0m`,
-    bgGreen: (text) => `\x1b[42m\x1b[30m${text}\x1b[0m`,
-    bgYellow: (text) => `\x1b[43m\x1b[30m${text}\x1b[0m`,
-};
+/**
+ * Logger utility.
+ * 
+ * Provides structured logging with different log levels and prefixes
+ * for system, security, ban, detection, and command events.
+ * 
+ * @module utils/logger
+ */
 
 function timestamp() {
-    return chalk.gray(new Date().toISOString().replace('T', ' ').substring(0, 19));
+    const now = new Date();
+    return now.toISOString().replace('T', ' ').substring(0, 19);
 }
 
-const logger = {
-    info(message) {
-        console.log(`${timestamp()} ${chalk.bgGreen(' INFO ')} ${message}`);
-    },
+const isProduction = process.env.NODE_ENV === 'production' || !process.env.TERM_PROGRAM;
 
-    warn(message) {
-        console.warn(`${timestamp()} ${chalk.bgYellow(' WARN ')} ${chalk.yellow(message)}`);
-    },
-
-    error(message, error = null) {
-        console.error(`${timestamp()} ${chalk.bgRed(' ERROR ')} ${chalk.red(message)}`);
-        if (error?.stack) {
-            console.error(chalk.gray(error.stack));
-        }
-    },
-
-    fatal(message, error = null) {
-        console.error(`${timestamp()} ${chalk.bgRed(' FATAL ')} ${chalk.bold(chalk.red(message))}`);
-        if (error?.stack) {
-            console.error(chalk.gray(error.stack));
-        }
-    },
-
-    system(message) {
-        console.log(`${timestamp()} ${chalk.cyan('⚡ SYSTEM')} ${chalk.bold(message)}`);
-    },
-
-    security(message) {
-        console.log(`${timestamp()} ${chalk.magenta('🛡️  SECURITY')} ${message}`);
-    },
-
-    ban(message) {
-        console.log(`${timestamp()} ${chalk.red('🔨 BAN')} ${chalk.bold(message)}`);
-    },
-
-    detection(message) {
-        console.log(`${timestamp()} ${chalk.yellow('⚠️  DETECTION')} ${message}`);
-    },
-
-    command(message) {
-        console.log(`${timestamp()} ${chalk.blue('📋 COMMAND')} ${message}`);
-    },
-
-    debug(message) {
-        if (process.env.DEBUG === 'true') {
-            console.log(`${timestamp()} ${chalk.gray(' DEBUG ')} ${chalk.gray(message)}`);
-        }
-    },
+/**
+ * Simple colored console logger with timestamps for production (Pterodactyl).
+ */
+const consoleLogger = {
+    info: (msg) => console.log(`${timestamp()} \x1b[32m INFO \x1b[0m ${msg}`),
+    warn: (msg) => console.warn(`${timestamp()} \x1b[33m WARN \x1b[0m ${msg}`),
+    error: (msg, err) => console.error(`${timestamp()} \x1b[31m ERROR \x1b[0m ${msg}`, err?.message || err),
+    fatal: (msg, err) => console.error(`${timestamp()} \x1b[31m FATAL \x1b[0m ${msg}`, err?.message || err),
+    system: (msg) => console.log(`${timestamp()} \x1b[36m⚡ SYSTEM\x1b[0m ${msg}`),
+    security: (msg) => console.log(`${timestamp()} \x1b[35m🛡️ SECURITY\x1b[0m ${msg}`),
+    ban: (msg) => console.log(`${timestamp()} \x1b[31m🔨 BAN\x1b[0m ${msg}`),
+    detection: (msg) => console.log(`${timestamp()} \x1b[33m⚠️ DETECTION\x1b[0m ${msg}`),
+    command: (msg) => console.log(`${timestamp()} \x1b[34m📋 COMMAND\x1b[0m ${msg}`),
+    debug: (msg) => console.log(`${timestamp()} \x1b[90m DEBUG \x1b[0m ${msg}`),
 };
 
-module.exports = logger;
+/**
+ * Pino logger for development (pretty output).
+ */
+let pinoLogger;
+if (!isProduction) {
+    try {
+        const pinoPretty = require('pino-pretty');
+        pinoLogger = pino({
+            level: process.env.LOG_LEVEL || 'debug',
+            transport: {
+                target: pinoPretty,
+                options: {
+                    colorize: true,
+                    translateTime: 'SYS:standard',
+                    ignore: 'pid,hostname',
+                },
+            },
+        });
+    } catch {
+        pinoLogger = null;
+    }
+}
+
+// Use appropriate logger based on environment
+const logger = isProduction ? consoleLogger : (pinoLogger || consoleLogger);
+
+module.exports = {
+    info: (msg) => logger.info(msg),
+    warn: (msg) => logger.warn(msg),
+    error: (msg, err) => logger.error(msg, err),
+    fatal: (msg, err) => logger.fatal(msg, err),
+    system: (msg) => logger.system(msg),
+    security: (msg) => logger.security(msg),
+    ban: (msg) => logger.ban(msg),
+    detection: (msg) => logger.detection(msg),
+    command: (msg) => logger.command(msg),
+    debug: (msg) => logger.debug(msg),
+};

@@ -1,29 +1,37 @@
-const {
-    SlashCommandBuilder,
-    PermissionFlagsBits,
-    MessageFlags,
-} = require('discord.js');
+/**
+ * Slash command to initialize a trap channel.
+ * 
+ * Clears the channel of existing messages and posts a warning embed
+ * to notify users that sending messages will result in an instant ban.
+ * 
+ * @module commands/setupTrap
+ */
+
+const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 
 const CONFIG = require('../config');
 const { createWarningEmbed } = require('../embeds/warningEmbed');
 const { createLogoAttachment } = require('../utils/helpers');
+const { hasAdminPermission } = require('../utils/permissions');
 const logger = require('../utils/logger');
 
 module.exports = {
+    /** Command definition for Discord */
     data: new SlashCommandBuilder()
         .setName('setup-trap')
         .setDescription('Initializes the trap: Clears channel and posts warning.'),
 
+    /**
+     * Execute the setup-trap command.
+     * 
+     * @param {import('discord.js').CommandInteraction} interaction - Discord interaction
+     * @returns {Promise<void>}
+     */
     async execute(interaction) {
-        // Permission check: OWNER_ID or Administrator
-        const isOwner = interaction.user.id === CONFIG.OWNER_ID;
-        const isAdmin = interaction.member?.permissions?.has(PermissionFlagsBits.Administrator);
-
-        logger.command(`setup-trap | User: ${interaction.user.tag} (${interaction.user.id}) | isOwner: ${isOwner} | isAdmin: ${isAdmin}`);
-
-        if (!isOwner && !isAdmin) {
-            return await interaction.reply({
-                content: '❌ You do not have permission to use this command. Only the authorized owner or administrators can use this.',
+        // Check permissions (owner or administrator)
+        if (!hasAdminPermission(interaction.member)) {
+            return interaction.reply({
+                content: '❌ You do not have permission to use this command.',
                 flags: [MessageFlags.Ephemeral],
             });
         }
@@ -32,31 +40,28 @@ module.exports = {
 
         const channel = interaction.channel;
 
-        // Check if the current channel is in the monitored list
+        // Warn if channel is not in the monitored list
         if (!CONFIG.BAN_CHANNEL_IDS.includes(channel.id)) {
             logger.warn(`setup-trap used in non-monitored channel #${channel.name} (${channel.id})`);
-            return await interaction.editReply({
-                content: '⚠️ This channel is not in the `BAN_CHANNEL_IDS` list in `.env`. Setup will proceed, but I won\'t auto-ban here until added.',
+            return interaction.editReply({
+                content: '⚠️ This channel is not in the `BAN_CHANNEL_IDS` list. Setup will proceed, but I won\'t auto-ban here until added.',
             });
         }
 
-        // Clear existing messages
+        // Clear existing messages (limit 50)
         const fetched = await channel.messages.fetch({ limit: 50 }).catch(() => null);
-        if (fetched && fetched.size > 0) {
-            await channel.bulkDelete(fetched, true).catch(() => null);
+        if (fetched?.size > 0) {
+            await channel.bulkDelete(fetched, true).catch(() => {});
             logger.info(`Cleared ${fetched.size} messages from #${channel.name}`);
         }
 
-        // Post warning embed
+        // Send warning embed
         await channel.send({
             embeds: [createWarningEmbed()],
             files: [createLogoAttachment()],
         });
 
-        logger.info(`Trap channel #${channel.name} initialized successfully.`);
-
-        await interaction.editReply({
-            content: '✅ Trap channel has been initialized with VoidSentry branding.',
-        });
+        logger.info(`Trap channel #${channel.name} initialized.`);
+        await interaction.editReply({ content: '✅ Trap channel has been initialized.' });
     },
 };

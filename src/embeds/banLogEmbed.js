@@ -1,16 +1,25 @@
+/**
+ * Detailed ban log embed.
+ * 
+ * Creates a comprehensive embed for the ban log channel with user info,
+ * member details, violation details, and suspicious account flags.
+ * 
+ * @module embeds/banLogEmbed
+ */
+
 const { EmbedBuilder } = require('discord.js');
 const { COLORS, LOGO_URL, BRAND_LOGGING } = require('../utils/constants');
 const { formatTimestamp } = require('../utils/helpers');
 
 /**
- * Creates a detailed ban log embed with extensive user information.
- *
+ * Creates a detailed ban log embed.
+ * 
  * @param {import('discord.js').User} user - The banned user
- * @param {import('discord.js').GuildMember|null} member - The member object (may be null if already removed)
+ * @param {Object|null} member - Guild member data (may be null if already removed)
  * @param {string} reason - Ban reason
- * @param {string} channelId - ID of the channel where the violation occurred
- * @param {string} messageContent - The content of the violating message
- * @returns {EmbedBuilder}
+ * @param {string} channelId - ID of the trap channel where violation occurred
+ * @param {string} messageContent - Content of the violating message
+ * @returns {import('discord.js').EmbedBuilder} Ban log embed
  */
 function createBanLogEmbed(user, member, reason, channelId, messageContent) {
     const accountCreated = user.createdAt;
@@ -37,7 +46,7 @@ function createBanLogEmbed(user, member, reason, channelId, messageContent) {
             },
         );
 
-    // Member-specific info (available only if still cached)
+    // Add member-specific info if available (member may be null after ban)
     if (member) {
         const joinedAt = member.joinedAt;
 
@@ -54,12 +63,12 @@ function createBanLogEmbed(user, member, reason, channelId, messageContent) {
             },
         );
 
-        // Roles (excluding @everyone)
+        // Add roles (excluding @everyone, limited to 15)
         const roles = member.roles.cache
             .filter(r => r.id !== member.guild.id)
             .sort((a, b) => b.position - a.position)
             .map(r => `<@&${r.id}>`)
-            .slice(0, 15); // Limit to 15 roles
+            .slice(0, 15);
 
         if (roles.length > 0) {
             embed.addFields({
@@ -70,7 +79,7 @@ function createBanLogEmbed(user, member, reason, channelId, messageContent) {
         }
     }
 
-    // Violation details
+    // Add violation details
     embed.addFields(
         {
             name: '⚠️ Violation Reason',
@@ -89,7 +98,7 @@ function createBanLogEmbed(user, member, reason, channelId, messageContent) {
         },
     );
 
-    // Message content (truncated if needed)
+    // Add message content (truncated if needed)
     if (messageContent) {
         const sanitized = messageContent.length > 1000
             ? messageContent.substring(0, 1000) + '...'
@@ -102,7 +111,7 @@ function createBanLogEmbed(user, member, reason, channelId, messageContent) {
         });
     }
 
-    // Account age warning
+    // Flag suspicious accounts (< 7 days old)
     const accountAgeMs = Date.now() - accountCreated.getTime();
     const accountAgeDays = Math.floor(accountAgeMs / (1000 * 60 * 60 * 24));
 
