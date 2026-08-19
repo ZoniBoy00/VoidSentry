@@ -12,7 +12,8 @@ function timestamp() {
     return now.toISOString().replace('T', ' ').substring(0, 19);
 }
 
-const isProduction = process.env.NODE_ENV === 'production' || !process.env.TERM_PROGRAM;
+const pino = require('pino');
+const isProduction = process.env.NODE_ENV === 'production';
 
 /**
  * Simple colored console logger with timestamps for production (Pterodactyl).

@@ -11,7 +11,7 @@ const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js'
 
 const CONFIG = require('../config');
 const { COLORS, LOGO_URL, BRAND_LOGGING } = require('../utils/constants');
-const { createLogoAttachment, formatTimestamp } = require('../utils/helpers');
+const { createLogoAttachment, formatTimestamp, sanitizeEmbedText } = require('../utils/helpers');
 const { hasAdminPermission } = require('../utils/permissions');
 const logger = require('../utils/logger');
 
@@ -70,13 +70,16 @@ module.exports = {
                 .setAuthor({ name: BRAND_LOGGING, iconURL: LOGO_URL })
                 .setThumbnail(user.displayAvatarURL({ size: 256, dynamic: true }))
                 .addFields(
-                    { name: '👤 User', value: `**Tag:** ${user.tag}\n**ID:** \`${user.id}\``, inline: true },
+                    { name: '👤 User', value: `**Tag:** ${sanitizeEmbedText(user.tag, 100)}\n**ID:** \`${user.id}\``, inline: true },
                     { name: '📅 Created', value: formatTimestamp(user.createdAt), inline: true },
-                    { name: '📋 Reason', value: banInfo.reason || 'No reason', inline: false },
+                    { name: '📋 Reason', value: sanitizeEmbedText(banInfo.reason || 'No reason', 1024), inline: false },
                 )
-                .addFields(accountAge < 7 ? { name: '🚩 Suspicious', value: `⚠️ Account only **${accountAge} days** old`, inline: false } : {})
                 .setTimestamp()
                 .setFooter({ text: BRAND_LOGGING, iconURL: LOGO_URL });
+
+            if (accountAge < 7) {
+                embed.addFields({ name: '🚩 Suspicious', value: `⚠️ Account only **${accountAge} days** old`, inline: false });
+            }
 
             await interaction.editReply({ embeds: [embed], files: [createLogoAttachment()] });
 

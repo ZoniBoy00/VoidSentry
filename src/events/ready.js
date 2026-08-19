@@ -36,7 +36,11 @@ module.exports = {
             await db.initDatabase();
             logger.system('Database connection established');
         } catch (err) {
-            logger.error('Failed to initialize database:', err.message);
+            logger.fatal('Failed to initialize database. Shutting down:', err);
+            await db.closePool().catch(() => {});
+            client.destroy();
+            process.exitCode = 1;
+            return;
         }
 
         // Set bot presence (status text and dnd status)

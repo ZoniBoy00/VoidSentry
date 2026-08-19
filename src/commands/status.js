@@ -13,6 +13,7 @@ const CONFIG = require('../config');
 const stats = require('../utils/stats');
 const { COLORS, LOGO_URL, BRAND_NAME } = require('../utils/constants');
 const { createLogoAttachment, formatTimestamp } = require('../utils/helpers');
+const { VERSION } = require('../utils/constants');
 const { hasAdminPermission } = require('../utils/permissions');
 
 module.exports = {
@@ -70,7 +71,7 @@ module.exports = {
             embed.addFields({ name: '🚀 Started', value: formatTimestamp(summary.startedAt), inline: false });
         }
 
-        embed.setTimestamp().setFooter({ text: `${BRAND_NAME} v2.0`, iconURL: LOGO_URL });
+        embed.setTimestamp().setFooter({ text: `${BRAND_NAME} v${VERSION}`, iconURL: LOGO_URL });
 
         await interaction.reply({ embeds: [embed], files: [createLogoAttachment()], flags: [MessageFlags.Ephemeral] });
     },

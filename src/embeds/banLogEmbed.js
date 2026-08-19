@@ -9,7 +9,7 @@
 
 const { EmbedBuilder } = require('discord.js');
 const { COLORS, LOGO_URL, BRAND_LOGGING } = require('../utils/constants');
-const { formatTimestamp } = require('../utils/helpers');
+const { formatTimestamp, sanitizeEmbedText } = require('../utils/helpers');
 
 /**
  * Creates a detailed ban log embed.
@@ -33,7 +33,7 @@ function createBanLogEmbed(user, member, reason, channelId, messageContent) {
             {
                 name: '👤 User',
                 value: [
-                    `**Tag:** ${user.tag}`,
+                    `**Tag:** ${sanitizeEmbedText(user.tag, 100)}`,
                     `**ID:** \`${user.id}\``,
                     `**Mention:** <@${user.id}>`,
                 ].join('\n'),
@@ -58,7 +58,7 @@ function createBanLogEmbed(user, member, reason, channelId, messageContent) {
             },
             {
                 name: '🏷️ Display Name',
-                value: member.displayName || user.username,
+                value: sanitizeEmbedText(member.displayName || user.username, 256),
                 inline: true,
             },
         );
@@ -83,7 +83,7 @@ function createBanLogEmbed(user, member, reason, channelId, messageContent) {
     embed.addFields(
         {
             name: '⚠️ Violation Reason',
-            value: reason,
+            value: sanitizeEmbedText(reason, 1024),
             inline: false,
         },
         {
@@ -106,7 +106,7 @@ function createBanLogEmbed(user, member, reason, channelId, messageContent) {
 
         embed.addFields({
             name: '💬 Message Content',
-            value: `\`\`\`${sanitized}\`\`\``,
+            value: `\`\`\`${sanitizeEmbedText(sanitized, 1000)}\`\`\``,
             inline: false,
         });
     }

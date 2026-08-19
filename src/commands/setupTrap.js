@@ -39,6 +39,9 @@ module.exports = {
         await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 
         const channel = interaction.channel;
+        if (!channel?.isTextBased() || typeof channel.bulkDelete !== 'function') {
+            return interaction.editReply({ content: '❌ This command can only be used in a text channel.' });
+        }
 
         // Warn if channel is not in the monitored list
         if (!CONFIG.BAN_CHANNEL_IDS.includes(channel.id)) {
@@ -48,7 +51,7 @@ module.exports = {
             });
         }
 
-        // Clear existing messages (limit 50)
+        // Clear up to 50 recent messages; Discord does not bulk-delete messages older than 14 days.
         const fetched = await channel.messages.fetch({ limit: 50 }).catch(() => null);
         if (fetched?.size > 0) {
             await channel.bulkDelete(fetched, true).catch(() => {});

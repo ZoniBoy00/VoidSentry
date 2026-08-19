@@ -1,6 +1,6 @@
 {
   "name": "voidsentry",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "VoidSentry — A high-performance Discord security bot for trapping and banning self-bots.",
   "main": "index.js",
   "scripts": {
@@ -8,7 +8,7 @@
     "dev": "NODE_ENV=development node index.js",
     "deploy": "node src/utils/deploy.js",
     "deploy:guild": "NODE_ENV=development node src/utils/deploy.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test"
   },
   "keywords": [
     "discord",
@@ -21,9 +21,9 @@
   "license": "MIT",
   "type": "commonjs",
   "dependencies": {
-    "discord.js": "^14.26.2",
+    "discord.js": "^14.27.0",
     "dotenv": "^17.4.2",
-    "mysql2": "^3.22.0",
+    "mysql2": "^3.23.3",
     "pino": "^10.3.1"
   },
   "devDependencies": {

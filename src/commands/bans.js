@@ -12,7 +12,7 @@ const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js'
 const CONFIG = require('../config');
 const db = require('../utils/db');
 const { COLORS, LOGO_URL, BRAND_LOGGING } = require('../utils/constants');
-const { formatTimestamp } = require('../utils/helpers');
+const { formatTimestamp, sanitizeEmbedText } = require('../utils/helpers');
 const { hasAdminPermission } = require('../utils/permissions');
 
 const DISCORD_ID_REGEX = /^\d{17,19}$/;
@@ -80,8 +80,8 @@ module.exports = {
                 .setAuthor({ name: BRAND_LOGGING, iconURL: LOGO_URL });
 
             const fields = bans.map((ban, i) => ({
-                name: `#${i + 1} — ${ban.user_tag}`,
-                value: `**ID:** \`${ban.user_id}\`\n**Server:** ${ban.guild_name}\n**Channel:** #${ban.channel_name}\n**Time:** ${formatTimestamp(new Date(ban.created_at))}`,
+                name: `#${i + 1} — ${sanitizeEmbedText(ban.user_tag, 100)}`,
+                value: `**ID:** \`${ban.user_id}\`\n**Server:** ${sanitizeEmbedText(ban.guild_name, 100)}\n**Channel:** #${sanitizeEmbedText(ban.channel_name, 100)}\n**Time:** ${formatTimestamp(new Date(ban.created_at))}`,
                 inline: false,
             }));
 
@@ -127,8 +127,8 @@ module.exports = {
 
             const recentBans = bans.slice(0, 10);
             const fields = recentBans.map((ban, i) => ({
-                name: `#${i + 1} — ${ban.guild_name}`,
-                value: `**Time:** ${formatTimestamp(new Date(ban.created_at))}\n**Channel:** #${ban.channel_name}\n**Reason:** ${ban.reason}`,
+                name: `#${i + 1} — ${sanitizeEmbedText(ban.guild_name, 100)}`,
+                value: `**Time:** ${formatTimestamp(new Date(ban.created_at))}\n**Channel:** #${sanitizeEmbedText(ban.channel_name, 100)}\n**Reason:** ${sanitizeEmbedText(ban.reason, 500)}`,
                 inline: true,
             }));
 

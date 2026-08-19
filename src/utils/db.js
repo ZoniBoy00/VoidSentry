@@ -11,6 +11,7 @@ const mysql = require('mysql2/promise');
 const CONFIG = require('../config');
 
 let pool = null;
+let initPromise = null;
 
 /**
  * Initialize the MySQL connection pool.
@@ -20,26 +21,26 @@ let pool = null;
  */
 async function initDatabase() {
     if (pool) return pool;
+    if (initPromise) return initPromise;
 
-    pool = mysql.createPool({
-        host: CONFIG.DB.host,
-        port: CONFIG.DB.port,
-        user: CONFIG.DB.user,
-        password: CONFIG.DB.password,
-        database: CONFIG.DB.database,
-        waitForConnections: true,
-        connectionLimit: 10,
-        queueLimit: 0,
-    });
+    initPromise = (async () => {
+        const candidate = mysql.createPool({
+            host: CONFIG.DB.host,
+            port: CONFIG.DB.port,
+            user: CONFIG.DB.user,
+            password: CONFIG.DB.password,
+            database: CONFIG.DB.database,
+            waitForConnections: true,
+            connectionLimit: 10,
+            queueLimit: 0,
+            connectTimeout: 10000,
+            enableKeepAlive: true,
+            keepAliveInitialDelay: 0,
+        });
 
-    // Create database if not exists
-    await pool.query(`CREATE DATABASE IF NOT EXISTS \`${CONFIG.DB.database}\``);
-    
-    // Use the database
-    await pool.query(`USE \`${CONFIG.DB.database}\``);
-
-    // Create bans table
-    await pool.query(`
+        try {
+            await candidate.query('SELECT 1');
+            await candidate.query(`
         CREATE TABLE IF NOT EXISTS bans (
             id INT AUTO_INCREMENT PRIMARY KEY,
             user_id VARCHAR(20) NOT NULL,
@@ -55,9 +56,18 @@ async function initDatabase() {
             INDEX idx_guild_id (guild_id),
             INDEX idx_created_at (created_at)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-    `);
+            `);
+            pool = candidate;
+            return pool;
+        } catch (error) {
+            await candidate.end().catch(() => {});
+            throw error;
+        } finally {
+            initPromise = null;
+        }
+    })();
 
-    return pool;
+    return initPromise;
 }
 
 /**

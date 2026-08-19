@@ -8,6 +8,7 @@
  */
 
 const path = require('path');
+const VERSION = require('../../package.json').version;
 
 /** Discord embed color palette */
 const COLORS = {
@@ -49,5 +50,6 @@ module.exports = {
     BRAND_NAME,
     BRAND_SECURITY,
     BRAND_LOGGING,
+    VERSION,
     getBanReason,
 };

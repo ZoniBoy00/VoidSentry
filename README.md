@@ -26,7 +26,7 @@ A high-performance Discord security bot designed to catch and remove self-bots a
     - `/bans recent [limit]` — Show recent bans
     - `/bans search <user_id>` — Search bans by user ID
     - `/bans stats` — Show database statistics
-- **Structured Logging** — Colored console logger with timestamps (system, security, ban, detection, command)
+- **Structured Logging** — Pino-based logger with categories (system, security, ban, detection, command)
 - **Statistics Tracking** — In-memory tracking of bans, detections, and DM success rate
 - **Branded Design** — Custom logo and professional embeds
 
@@ -58,7 +58,7 @@ VoidSentry/
 │       ├── db.js                   # MySQL database connection
 │       ├── deploy.js              # Slash command deployment
 │       ├── helpers.js             # Utility functions
-│       ├── logger.js              # Colored console logger with timestamps
+│       ├── logger.js              # Pino structured logger
 │       ├── permissions.js         # Permission checker
 │       ├── stats.js               # In-memory statistics
 │       └── constants.js           # Colors, paths, branding
@@ -101,17 +101,18 @@ Copy `.env.example` to `.env` and fill in your credentials:
 ### MySQL Database Configuration
 | Key | Description | Default |
 | :--- | :--- | :--- |
-| `DB_HOST` | MySQL server hostname | `localhost` |
+| `DB_HOST` | MySQL server hostname | required |
 | `DB_PORT` | MySQL server port | `3306` |
-| `DB_USER` | MySQL username | `root` |
-| `DB_PASSWORD` | MySQL password | (empty) |
-| `DB_NAME` | Database name | `voidsentry` |
+| `DB_USER` | MySQL username | required |
+| `DB_PASSWORD` | MySQL password | required |
+| `DB_NAME` | Existing database name | required |
 
-**Note:** The database and table will be created automatically on first run.
+**Note:** The `bans` table is created automatically. The database itself must exist
+and the configured user only needs access to that database.
 
 ## 🕹️ How to Use
 
-1. **Create Database** (optional - auto-created on first run):
+1. **Create Database** (once, using an administrator account):
    ```sql
    CREATE DATABASE voidsentry;
    ```

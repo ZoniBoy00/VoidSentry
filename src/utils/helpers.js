@@ -41,6 +41,13 @@ function formatTimestamp(date) {
     return `${discordTimestamp(date, 'f')} (${discordTimestamp(date, 'R')})`;
 }
 
+function sanitizeEmbedText(value, maxLength = 1024) {
+    return String(value ?? '')
+        .replace(/`/g, 'ˋ')
+        .replace(/@/g, '@\u200b')
+        .slice(0, maxLength);
+}
+
 /**
  * Safely fetches a channel from a guild. Returns null on failure.
  * 
@@ -61,5 +68,6 @@ module.exports = {
     createLogoAttachment,
     discordTimestamp,
     formatTimestamp,
+    sanitizeEmbedText,
     fetchChannel,
 };

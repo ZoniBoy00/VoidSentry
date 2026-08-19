@@ -28,8 +28,9 @@ const stats = require('../utils/stats');
 const db = require('../utils/db');
 
 // Log channel caching to avoid repeated API calls
-let logChannelCache = null;
-let logChannelFetchAttempted = false;
+const logChannelCache = new Map();
+const logChannelFetchAttempts = new Map();
+const activeViolations = new Set();
 
 /**
  * Get cached log channel or fetch from API.
@@ -41,15 +42,17 @@ let logChannelFetchAttempted = false;
 async function getLogChannel(client, guild) {
     if (!CONFIG.LOG_CHANNEL_ID) return null;
     
-    if (logChannelCache) return logChannelCache;
-    if (logChannelFetchAttempted) return null;
+    const guildKey = guild.id;
+    if (logChannelCache.has(guildKey)) return logChannelCache.get(guildKey);
+    const lastAttempt = logChannelFetchAttempts.get(guildKey) || 0;
+    if (Date.now() - lastAttempt < 30000) return null;
 
-    logChannelFetchAttempted = true;
+    logChannelFetchAttempts.set(guildKey, Date.now());
     
     try {
         const channel = await guild.channels.fetch(CONFIG.LOG_CHANNEL_ID);
         if (channel?.isTextBased()) {
-            logChannelCache = channel;
+            logChannelCache.set(guildKey, channel);
             return channel;
         }
     } catch (err) {
@@ -77,6 +80,9 @@ module.exports = {
         }
 
         const { author, guild, member, channel } = message;
+        const violationKey = `${guild.id}:${author.id}`;
+        if (activeViolations.has(violationKey)) return;
+        activeViolations.add(violationKey);
         const messageContent = message.content || '[No text content]';
 
         try {
@@ -160,12 +166,15 @@ module.exports = {
                     await logChannel.send({
                         embeds: [embed],
                         files: [createLogoAttachment()],
+                        allowedMentions: { parse: [] },
                     });
                 }
             }
 
         } catch (error) {
             logger.fatal('Security process failed!', error);
+        } finally {
+            activeViolations.delete(violationKey);
         }
     },
 };
