@@ -138,7 +138,8 @@ async function getBans(limit = 50, offset = 0) {
     const db = await getPool();
     
     const [rows] = await db.query(
-        `SELECT * FROM bans ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+        `SELECT id, user_id, user_tag, guild_id, guild_name, channel_id, channel_name, reason, created_at
+         FROM bans ORDER BY created_at DESC LIMIT ? OFFSET ?`,
         [limit, offset]
     );
     

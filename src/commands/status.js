@@ -11,8 +11,10 @@ const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js'
 
 const CONFIG = require('../config');
 const stats = require('../utils/stats');
+const db = require('../utils/db');
+const logger = require('../utils/logger');
 const { COLORS, LOGO_URL, BRAND_NAME } = require('../utils/constants');
-const { createLogoAttachment, formatTimestamp } = require('../utils/helpers');
+const { createLogoAttachment, formatTimestamp, sanitizeEmbedText } = require('../utils/helpers');
 const { VERSION } = require('../utils/constants');
 const { hasAdminPermission } = require('../utils/permissions');
 
@@ -37,8 +39,20 @@ module.exports = {
             });
         }
 
+        await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
+
         const summary = stats.getSummary();
         const client = interaction.client;
+        let storedBanCount = null;
+        let recentBans = [];
+        try {
+            [storedBanCount, recentBans] = await Promise.all([
+                db.getBanCount(),
+                db.getBans(5),
+            ]);
+        } catch (error) {
+            logger.error('Failed to load persistent ban history for /status.', error);
+        }
 
         // Build status embed
         const embed = new EmbedBuilder()
@@ -50,18 +64,19 @@ module.exports = {
                 { name: '⏱️ Uptime', value: `\`${summary.uptime}\``, inline: true },
                 { name: '📡 Ping', value: `\`${client.ws.ping}ms\``, inline: true },
                 { name: '🏠 Servers', value: `\`${client.guilds.cache.size}\``, inline: true },
-                { name: '🔨 Total Bans', value: `\`${summary.totalBans}\``, inline: true },
-                { name: '⚠️ Detections', value: `\`${summary.totalDetections}\``, inline: true },
-                { name: '📨 DM Success', value: `\`${summary.dmSuccessRate}%\``, inline: true },
+                { name: '🗄️ Bans in Database', value: storedBanCount === null ? 'Unavailable' : `\`${storedBanCount}\``, inline: true },
+                { name: '🔨 Bans This Run', value: `\`${summary.totalBans}\``, inline: true },
+                { name: '⚠️ Detections This Run', value: `\`${summary.totalDetections}\``, inline: true },
+                { name: '📨 DM Success This Run', value: `\`${summary.dmSuccessRate}%\``, inline: true },
                 { name: '🪤 Channels', value: `\`${CONFIG.BAN_CHANNEL_IDS.length}\``, inline: true },
                 { name: '📝 Log Channel', value: CONFIG.LOG_CHANNEL_ID ? `<#${CONFIG.LOG_CHANNEL_ID}>` : 'Not set', inline: true },
             );
 
-        // Add recent bans if available
-        if (summary.recentBans.length > 0) {
+        // Show persistent history rather than the process-local recent-ban cache.
+        if (recentBans.length > 0) {
             embed.addFields({
-                name: `📋 Recent Bans (${Math.min(summary.recentBans.length, 5)})`,
-                value: summary.recentBans.slice(0, 5).map((b, i) => `\`${i + 1}.\` **${b.userTag}** — ${formatTimestamp(b.timestamp)}`).join('\n'),
+                name: `📋 Latest Stored Bans (${recentBans.length})`,
+                value: recentBans.map((ban, i) => `\`${i + 1}.\` **${sanitizeEmbedText(ban.user_tag, 100)}** — ${formatTimestamp(new Date(ban.created_at))}`).join('\n'),
                 inline: false,
             });
         }
@@ -73,6 +88,6 @@ module.exports = {
 
         embed.setTimestamp().setFooter({ text: `${BRAND_NAME} v${VERSION}`, iconURL: LOGO_URL });
 
-        await interaction.reply({ embeds: [embed], files: [createLogoAttachment()], flags: [MessageFlags.Ephemeral] });
+        await interaction.editReply({ embeds: [embed], files: [createLogoAttachment()] });
     },
 };

@@ -105,7 +105,7 @@ function createBanLogEmbed(user, member, reason, channelId, messageContent) {
             : messageContent;
 
         embed.addFields({
-            name: '💬 Message Content',
+            name: '🧾 Message / Attachments',
             value: `\`\`\`${sanitizeEmbedText(sanitized, 1000)}\`\`\``,
             inline: false,
         });

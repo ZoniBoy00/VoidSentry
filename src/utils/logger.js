@@ -21,8 +21,12 @@ const isProduction = process.env.NODE_ENV === 'production';
 const consoleLogger = {
     info: (msg) => console.log(`${timestamp()} \x1b[32m INFO \x1b[0m ${msg}`),
     warn: (msg) => console.warn(`${timestamp()} \x1b[33m WARN \x1b[0m ${msg}`),
-    error: (msg, err) => console.error(`${timestamp()} \x1b[31m ERROR \x1b[0m ${msg}`, err?.message || err),
-    fatal: (msg, err) => console.error(`${timestamp()} \x1b[31m FATAL \x1b[0m ${msg}`, err?.message || err),
+    error: (msg, err) => err == null
+        ? console.error(`${timestamp()} \x1b[31m ERROR \x1b[0m ${msg}`)
+        : console.error(`${timestamp()} \x1b[31m ERROR \x1b[0m ${msg}`, err?.message || err),
+    fatal: (msg, err) => err == null
+        ? console.error(`${timestamp()} \x1b[31m FATAL \x1b[0m ${msg}`)
+        : console.error(`${timestamp()} \x1b[31m FATAL \x1b[0m ${msg}`, err?.message || err),
     system: (msg) => console.log(`${timestamp()} \x1b[36m⚡ SYSTEM\x1b[0m ${msg}`),
     security: (msg) => console.log(`${timestamp()} \x1b[35m🛡️ SECURITY\x1b[0m ${msg}`),
     ban: (msg) => console.log(`${timestamp()} \x1b[31m🔨 BAN\x1b[0m ${msg}`),
