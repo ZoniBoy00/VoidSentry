@@ -185,6 +185,35 @@ async function getBans(limit = 50, offset = 0, guildId = null) {
 }
 
 /**
+ * Search one server's bans for the dashboard, newest first.
+ *
+ * @param {string} guildId - Server to search in
+ * @param {{query?: string, limit?: number, offset?: number}} [options] - Optional user ID or name fragment, and paging
+ * @returns {Promise<{total: number, rows: Object[]}>}
+ */
+async function searchBans(guildId, { query = '', limit = 25, offset = 0 } = {}) {
+    const db = await getPool();
+    const params = [guildId];
+    let where = 'guild_id = ?';
+    const text = query.trim();
+    if (text) {
+        // Escape LIKE wildcards so the search text is matched literally.
+        const escaped = text.replace(/[\\%_]/g, '\\$&');
+        where += ' AND (user_id = ? OR user_tag LIKE ?)';
+        params.push(text, `%${escaped}%`);
+    }
+
+    const [[{ count }]] = await db.query(`SELECT COUNT(*) AS count FROM bans WHERE ${where}`, params);
+    const [rows] = await db.query(
+        `SELECT id, user_id, user_tag, channel_id, channel_name, message_content, reason, created_at
+         FROM bans WHERE ${where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
+        [...params, limit, offset]
+    );
+
+    return { total: Number(count), rows };
+}
+
+/**
  * Get total count of stored bans.
  *
  * @param {string|null} guildId - Restrict to one server (null = all servers)
@@ -385,6 +414,7 @@ module.exports = {
     addBan,
     findBansByUserId,
     getBans,
+    searchBans,
     getBanCount,
     getBanCountSince,
     getGuildStats,

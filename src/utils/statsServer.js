@@ -1,8 +1,9 @@
 /**
- * Read-only public stats endpoint.
+ * Read-only HTTP endpoint for the project website.
  *
- * Serves aggregate numbers (servers, bans, members) as JSON so the project
- * website can show live stats. Nothing user-specific is exposed. Disabled
+ * /stats serves aggregate numbers (servers, bans, members) as JSON so the site
+ * can show live stats; nothing user-specific is exposed. When a token is set,
+ * /api/* also serves the dashboard API (see dashboardApi.js). Disabled
  * unless STATS_PORT is set; by default it only listens on localhost, so put
  * a tunnel or reverse proxy in front of it to make it reachable.
  *
@@ -13,6 +14,7 @@ const http = require('node:http');
 const crypto = require('node:crypto');
 
 const db = require('./db');
+const { createDashboardApi } = require('./dashboardApi');
 const logger = require('./logger');
 
 /** How long a computed answer is reused, so the database is not queried per request. */
@@ -69,6 +71,7 @@ function createStatsServer(client, { token = null } = {}) {
     let cached = null;
     let cachedAt = 0;
     let inflight = null;
+    const dashboardApi = createDashboardApi(client);
 
     async function getPayload() {
         if (cached && Date.now() - cachedAt < CACHE_MS) return cached;
@@ -94,14 +97,21 @@ function createStatsServer(client, { token = null } = {}) {
             res.end(JSON.stringify(body));
         };
 
-        const path = (req.url || '').split('?')[0];
-        if (req.method !== 'GET' || path !== '/stats') return send(404, { error: 'not found' });
+        const url = new URL(req.url || '/', 'http://localhost');
+        const path = url.pathname;
+        const isApi = path.startsWith('/api/');
+        if (!isApi && (req.method !== 'GET' || path !== '/stats')) return send(404, { error: 'not found' });
+
+        // The dashboard API exposes per-server data, so it is never available without a token.
+        if (isApi && !token) return send(404, { error: 'not found' });
 
         if (token) {
             const header = req.headers.authorization || '';
             const presented = header.startsWith('Bearer ') ? header.slice(7) : '';
             if (!presented || !tokenMatches(presented, token)) return send(401, { error: 'unauthorized' });
         }
+
+        if (isApi) return dashboardApi(req, res, url);
 
         try {
             send(200, await getPayload());
