@@ -25,10 +25,14 @@ const OTHER_GUILD = '33333333333333333';
 const ADMIN = '44444444444444444';
 const MEMBER = '55555555555555555';
 const SERVER_OWNER = '66666666666666666';
+const BOT_OWNER = '12345678901234568';
 
 const searches = [];
 db.getBanCount = async () => 7;
 db.getUniqueUserCount = async () => 6;
+const purged = [];
+db.getBanCountsByGuild = async () => new Map([[GUILD, 7], [OTHER_GUILD, 2]]);
+db.deleteBansByUser = async userId => { purged.push(userId); return 3; };
 db.searchBans = async (guildId, options) => {
   searches.push({ guildId, ...options });
   return {
@@ -68,7 +72,7 @@ function makeGuild(id, name, { canBan = true } = {}) {
 const guilds = new Map([[GUILD, makeGuild(GUILD, 'Main server')], [OTHER_GUILD, makeGuild(OTHER_GUILD, 'Other', { canBan: false })]]);
 const client = { guilds: { cache: guilds } };
 
-function request(server, path, { user = ADMIN, token = TOKEN, method = 'GET' } = {}) {
+function request(server, path, { user = ADMIN, token = TOKEN, method = 'GET', body = null } = {}) {
   const headers = {};
   if (token) headers.authorization = `Bearer ${token}`;
   if (user) headers['x-discord-user'] = user;
@@ -79,7 +83,7 @@ function request(server, path, { user = ADMIN, token = TOKEN, method = 'GET' } =
       res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(body) }));
     });
     req.on('error', reject);
-    req.end();
+    req.end(body === null ? undefined : JSON.stringify(body));
   });
 }
 
@@ -173,5 +177,59 @@ test('the server list only includes servers the user may manage', async () => {
     assert.deepEqual(admin.body.guilds.map(g => g.id), [GUILD, OTHER_GUILD]);
     const member = await request(server, `/api/guilds?ids=${ids}`, { user: MEMBER });
     assert.deepEqual(member.body.guilds, []);
+  });
+});
+
+test('the bot owner can open any server, other users are not owners', async () => {
+  await withServer({ token: TOKEN }, async server => {
+    assert.equal((await request(server, `/api/guilds/${GUILD}`, { user: BOT_OWNER })).status, 200);
+    assert.equal((await request(server, '/api/me', { user: BOT_OWNER })).body.isOwner, true);
+    assert.equal((await request(server, '/api/me', { user: ADMIN })).body.isOwner, false);
+  });
+});
+
+test('admin routes look like they do not exist to everyone but the bot owner', async () => {
+  await withServer({ token: TOKEN }, async server => {
+    for (const user of [ADMIN, SERVER_OWNER, MEMBER]) {
+      assert.equal((await request(server, '/api/admin/overview', { user })).status, 404);
+      assert.equal((await request(server, '/api/admin/bans', { user })).status, 404);
+    }
+    purged.length = 0;
+    const attempt = await request(server, '/api/admin/purge-user', { user: ADMIN, method: 'POST', body: { userId: '77777777777777777' } });
+    assert.equal(attempt.status, 404);
+    assert.deepEqual(purged, []);
+  });
+});
+
+test('the owner sees every server with ban counts, busiest first', async () => {
+  await withServer({ token: TOKEN }, async server => {
+    const { status, body } = await request(server, '/api/admin/overview', { user: BOT_OWNER });
+    assert.equal(status, 200);
+    assert.deepEqual(body.servers.map(s => [s.id, s.bans]), [[GUILD, 7], [OTHER_GUILD, 2]]);
+    assert.deepEqual(body.totals, { bans: 7, uniqueUsers: 6 });
+  });
+});
+
+test('the owner can search bans across all servers', async () => {
+  await withServer({ token: TOKEN }, async server => {
+    searches.length = 0;
+    const { status, body } = await request(server, '/api/admin/bans?q=spam&page=2', { user: BOT_OWNER });
+    assert.equal(status, 200);
+    assert.equal(body.total, 51);
+    assert.deepEqual(searches[0], { guildId: null, query: 'spam', limit: 25, offset: 25 });
+  });
+});
+
+test('the owner can delete a user from all ban records, and bad IDs are refused', async () => {
+  await withServer({ token: TOKEN }, async server => {
+    purged.length = 0;
+    const ok = await request(server, '/api/admin/purge-user', { user: BOT_OWNER, method: 'POST', body: { userId: '77777777777777777' } });
+    assert.equal(ok.status, 200);
+    assert.equal(ok.body.deleted, 3);
+    assert.deepEqual(purged, ['77777777777777777']);
+
+    const bad = await request(server, '/api/admin/purge-user', { user: BOT_OWNER, method: 'POST', body: { userId: 'nope' } });
+    assert.equal(bad.status, 400);
+    assert.equal(purged.length, 1);
   });
 });

@@ -7,16 +7,23 @@
  * up itself and only answers if they are the owner or have Administrator, the
  * same rule the slash commands use.
  *
- * Routes (all GET):
- *   /api/guilds?ids=1,2,3       which of these servers the user may open
- *   /api/guilds/:id             settings, health and totals of one server
- *   /api/guilds/:id/bans        ban history of one server (?page=, ?q=)
+ * The bot owner (OWNER_ID) may open every server and use the /api/admin routes.
+ *
+ * Routes:
+ *   GET  /api/me                    whether the user is the bot owner
+ *   GET  /api/guilds?ids=1,2,3      which of these servers the user may open
+ *   GET  /api/guilds/:id            settings, health and totals of one server
+ *   GET  /api/guilds/:id/bans       ban history of one server (?page=, ?q=)
+ *   GET  /api/admin/overview        every server and the global totals (owner only)
+ *   GET  /api/admin/bans            ban history across all servers (owner only)
+ *   POST /api/admin/purge-user      delete a user's ban records everywhere (owner only)
  *
  * @module utils/dashboardApi
  */
 
 const { PermissionFlagsBits } = require('discord.js');
 
+const CONFIG = require('../config');
 const db = require('./db');
 const guildSettings = require('./guildSettings');
 const logger = require('./logger');
@@ -25,6 +32,7 @@ const SNOWFLAKE = /^\d{17,20}$/;
 const MAX_IDS = 100;
 const PAGE_SIZE = 25;
 const MAX_QUERY_LENGTH = 100;
+const MAX_BODY_BYTES = 1024;
 
 /**
  * The server if the user may manage it through the dashboard, otherwise null.
@@ -37,7 +45,7 @@ const MAX_QUERY_LENGTH = 100;
 async function manageableGuild(client, guildId, userId) {
     const guild = client.guilds.cache.get(guildId);
     if (!guild) return null;
-    if (guild.ownerId === userId) return guild;
+    if (guild.ownerId === userId || userId === CONFIG.OWNER_ID) return guild;
 
     const member = await guild.members.fetch(userId).catch(() => null);
     return member?.permissions?.has(PermissionFlagsBits.Administrator) ? guild : null;
@@ -83,6 +91,54 @@ async function describeGuild(guild) {
     };
 }
 
+/** Serialise a ban row for the API. */
+function banJson(row) {
+    return {
+        id: row.id,
+        userId: row.user_id,
+        userTag: row.user_tag,
+        guildId: row.guild_id,
+        guildName: row.guild_name,
+        channelName: row.channel_name,
+        reason: row.reason,
+        messageContent: row.message_content,
+        createdAt: new Date(row.created_at).toISOString(),
+    };
+}
+
+/** Parse query parameters shared by the ban list routes. */
+function pagingFrom(url) {
+    return {
+        page: Math.max(1, Math.min(10000, Number.parseInt(url.searchParams.get('page'), 10) || 1)),
+        query: (url.searchParams.get('q') || '').slice(0, MAX_QUERY_LENGTH),
+    };
+}
+
+/** Read a small JSON request body; null if it is too large or not JSON. */
+function readJson(req) {
+    return new Promise(resolve => {
+        let size = 0;
+        const chunks = [];
+        req.on('data', chunk => {
+            size += chunk.length;
+            if (size > MAX_BODY_BYTES) {
+                resolve(null);
+                req.destroy();
+            } else {
+                chunks.push(chunk);
+            }
+        });
+        req.on('end', () => {
+            try {
+                resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+            } catch {
+                resolve(null);
+            }
+        });
+        req.on('error', () => resolve(null));
+    });
+}
+
 /**
  * Create the request handler for /api/* paths.
  *
@@ -100,13 +156,57 @@ function createDashboardApi(client) {
             res.end(JSON.stringify(body));
         };
 
-        if (req.method !== 'GET') return send(405, { error: 'method not allowed' });
-
         const userId = String(req.headers['x-discord-user'] || '');
         if (!SNOWFLAKE.test(userId)) return send(400, { error: 'missing or invalid X-Discord-User' });
 
         try {
             const parts = url.pathname.split('/').filter(Boolean); // ['api', 'guilds', id?, 'bans'?]
+            const isBotOwner = userId === CONFIG.OWNER_ID;
+
+            if (parts[1] === 'admin') {
+                // Same answer as for a route that does not exist.
+                if (!isBotOwner) return send(404, { error: 'not found' });
+
+                if (req.method === 'GET' && parts.length === 3 && parts[2] === 'overview') {
+                    const counts = await db.getBanCountsByGuild();
+                    const [totalBans, uniqueUsers] = await Promise.all([db.getBanCount(), db.getUniqueUserCount()]);
+                    const servers = [...client.guilds.cache.values()]
+                        .map(guild => ({
+                            id: guild.id,
+                            name: guild.name,
+                            icon: guild.iconURL?.({ size: 128, extension: 'png' }) ?? null,
+                            memberCount: guild.memberCount ?? null,
+                            bans: counts.get(guild.id) ?? 0,
+                        }))
+                        .sort((a, b) => b.bans - a.bans || a.name.localeCompare(b.name));
+                    return send(200, {
+                        servers,
+                        totals: { bans: Number(totalBans), uniqueUsers: Number(uniqueUsers) },
+                        uptimeSeconds: Math.floor(process.uptime()),
+                    });
+                }
+
+                if (req.method === 'GET' && parts.length === 3 && parts[2] === 'bans') {
+                    const { page, query } = pagingFrom(url);
+                    const { total, rows } = await db.searchBans(null, { query, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE });
+                    return send(200, { total, page, pageSize: PAGE_SIZE, bans: rows.map(banJson) });
+                }
+
+                if (req.method === 'POST' && parts.length === 3 && parts[2] === 'purge-user') {
+                    const body = await readJson(req);
+                    const target = String(body?.userId ?? '');
+                    if (!SNOWFLAKE.test(target)) return send(400, { error: 'invalid userId' });
+                    const deleted = await db.deleteBansByUser(target);
+                    logger.info(`Dashboard: owner ${userId} deleted ${deleted} ban record(s) of ${target}.`);
+                    return send(200, { deleted: Number(deleted) });
+                }
+
+                return send(404, { error: 'not found' });
+            }
+
+            if (req.method !== 'GET') return send(405, { error: 'method not allowed' });
+
+            if (parts.length === 2 && parts[1] === 'me') return send(200, { isOwner: isBotOwner });
 
             if (parts.length === 2 && parts[1] === 'guilds') {
                 const ids = [...new Set((url.searchParams.get('ids') || '').split(',').filter(id => SNOWFLAKE.test(id)))].slice(0, MAX_IDS);
@@ -128,22 +228,13 @@ function createDashboardApi(client) {
                 if (parts.length === 3) return send(200, await describeGuild(guild));
 
                 if (parts[3] === 'bans') {
-                    const page = Math.max(1, Math.min(10000, Number.parseInt(url.searchParams.get('page'), 10) || 1));
-                    const query = (url.searchParams.get('q') || '').slice(0, MAX_QUERY_LENGTH);
+                    const { page, query } = pagingFrom(url);
                     const { total, rows } = await db.searchBans(guild.id, { query, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE });
                     return send(200, {
                         total,
                         page,
                         pageSize: PAGE_SIZE,
-                        bans: rows.map(row => ({
-                            id: row.id,
-                            userId: row.user_id,
-                            userTag: row.user_tag,
-                            channelName: row.channel_name,
-                            reason: row.reason,
-                            messageContent: row.message_content,
-                            createdAt: new Date(row.created_at).toISOString(),
-                        })),
+                        bans: rows.map(banJson),
                     });
                 }
             }

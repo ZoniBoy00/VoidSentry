@@ -185,16 +185,20 @@ async function getBans(limit = 50, offset = 0, guildId = null) {
 }
 
 /**
- * Search one server's bans for the dashboard, newest first.
+ * Search bans for the dashboard, newest first.
  *
- * @param {string} guildId - Server to search in
+ * @param {string|null} guildId - Server to search in (null = all servers, for the bot owner)
  * @param {{query?: string, limit?: number, offset?: number}} [options] - Optional user ID or name fragment, and paging
  * @returns {Promise<{total: number, rows: Object[]}>}
  */
 async function searchBans(guildId, { query = '', limit = 25, offset = 0 } = {}) {
     const db = await getPool();
-    const params = [guildId];
-    let where = 'guild_id = ?';
+    const params = [];
+    let where = '1 = 1';
+    if (guildId) {
+        where = 'guild_id = ?';
+        params.push(guildId);
+    }
     const text = query.trim();
     if (text) {
         // Escape LIKE wildcards so the search text is matched literally.
@@ -205,12 +209,23 @@ async function searchBans(guildId, { query = '', limit = 25, offset = 0 } = {}) 
 
     const [[{ count }]] = await db.query(`SELECT COUNT(*) AS count FROM bans WHERE ${where}`, params);
     const [rows] = await db.query(
-        `SELECT id, user_id, user_tag, channel_id, channel_name, message_content, reason, created_at
+        `SELECT id, user_id, user_tag, guild_id, guild_name, channel_id, channel_name, message_content, reason, created_at
          FROM bans WHERE ${where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
         [...params, limit, offset]
     );
 
     return { total: Number(count), rows };
+}
+
+/**
+ * Number of stored bans per server.
+ *
+ * @returns {Promise<Map<string, number>>} Server ID to ban count
+ */
+async function getBanCountsByGuild() {
+    const db = await getPool();
+    const [rows] = await db.query('SELECT guild_id, COUNT(*) AS count FROM bans GROUP BY guild_id');
+    return new Map(rows.map(row => [row.guild_id, Number(row.count)]));
 }
 
 /**
@@ -415,6 +430,7 @@ module.exports = {
     findBansByUserId,
     getBans,
     searchBans,
+    getBanCountsByGuild,
     getBanCount,
     getBanCountSince,
     getGuildStats,
