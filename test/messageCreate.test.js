@@ -31,6 +31,8 @@ function makeMessage({ hasBanPermission = true, bannable = true, banError = null
   const guild = {
     id: '12345678901234567',
     name: 'Test guild',
+    ownerId: '99999999999999999',
+    fetchOwner: async () => ({ send: async () => { actions.push({ type: 'owner-dm' }); } }),
     members: {
       me: { permissions: { has: () => hasBanPermission } },
       ban: async (_author, options) => {
@@ -76,6 +78,7 @@ function makeMessage({ hasBanPermission = true, bannable = true, banError = null
 test('leaves the trigger message intact when the bot lacks Ban Members', async () => {
   const { message, actions } = makeMessage({ hasBanPermission: false });
   await handler.execute({}, message);
+  assert.equal(actions.some(action => action.type === 'owner-dm'), true, 'the server owner is told');
   assert.equal(actions.some(action => action.type === 'ban'), false);
   assert.equal(actions.some(action => action.type === 'delete'), false);
 });
@@ -83,6 +86,7 @@ test('leaves the trigger message intact when the bot lacks Ban Members', async (
 test('leaves the trigger message intact when the member is not bannable', async () => {
   const { message, actions } = makeMessage({ bannable: false });
   await handler.execute({}, message);
+  assert.equal(actions.some(action => action.type === 'owner-dm'), true, 'the server owner is told');
   assert.equal(actions.some(action => action.type === 'ban'), false);
   assert.equal(actions.some(action => action.type === 'delete'), false);
 });
@@ -92,6 +96,7 @@ test('does not delete the trigger message when the Discord ban request fails', a
   const storedBansBefore = storedBans;
   await handler.execute({}, message);
   assert.equal(actions.some(action => action.type === 'ban'), true);
+  assert.equal(actions.some(action => action.type === 'owner-dm'), true, 'the server owner is told');
   assert.equal(actions.some(action => action.type === 'delete'), false);
   assert.equal(storedBans, storedBansBefore);
 });

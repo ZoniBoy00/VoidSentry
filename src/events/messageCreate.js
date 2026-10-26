@@ -22,6 +22,8 @@ const { Events, PermissionFlagsBits } = require('discord.js');
 
 const { createBanLogEmbed } = require('../embeds/banLogEmbed');
 const { createBanNotificationEmbed } = require('../embeds/banNotificationEmbed');
+const { alertGuildOwner } = require('../utils/ownerAlerts');
+const { createUnbanRow } = require('../utils/unbanButton');
 const { createLogoAttachment, sanitizeEmbedText } = require('../utils/helpers');
 const { buildMessageEvidence } = require('../utils/messageEvidence');
 const logger = require('../utils/logger');
@@ -172,6 +174,7 @@ module.exports = {
                 logger.error(`Cannot ban ${author.tag} (${author.id}) in #${channel.name}: missing Ban Members permission. Message was left intact.`);
                 await notifyLogChannel(client, guild, guildConfig.logChannelId,
                     `⚠️ **Ban failed:** ${tag} (\`${author.id}\`) wrote in <#${channel.id}>, but I lack the **Ban Members** permission. The message was left intact.`);
+                await alertGuildOwner(guild, 'missing-permission');
                 return;
             }
 
@@ -180,6 +183,8 @@ module.exports = {
                 logger.error(`Cannot ban ${author.tag} (${author.id}) in #${channel.name}: role hierarchy issue or member unavailable. Message was left intact.`);
                 await notifyLogChannel(client, guild, guildConfig.logChannelId,
                     `⚠️ **Ban failed:** ${tag} (\`${author.id}\`) wrote in <#${channel.id}>, but they cannot be banned (my role is not above theirs, or they are no longer a member). The message was left intact.`);
+                // A server owner cannot be banned by anyone, so there is nothing for them to fix.
+                if (author.id !== guild.ownerId) await alertGuildOwner(guild, 'hierarchy');
                 return;
             }
 
@@ -259,6 +264,7 @@ module.exports = {
                     await logChannel.send({
                         embeds: [embed],
                         files: [createLogoAttachment()],
+                        components: [createUnbanRow(author.id)],
                         allowedMentions: { parse: [] },
                     });
                 }
@@ -271,6 +277,7 @@ module.exports = {
                 logger.error(`Security action failed for ${author.tag} (${author.id}) in #${channel.name}; no trigger-message deletion was requested.`, error);
                 await notifyLogChannel(client, guild, guildConfig.logChannelId,
                     `⚠️ **Ban failed:** ${tag} (\`${author.id}\`) wrote in <#${channel.id}>, but the ban request failed. Check my permissions.`);
+                await alertGuildOwner(guild, 'ban-failed');
             }
         } finally {
             activeViolations.delete(violationKey);

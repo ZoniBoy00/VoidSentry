@@ -29,6 +29,7 @@ function makeInteraction(userId, userOption = TARGET) {
       commandName: 'purge-user',
       user: { id: userId, tag: 'someone#0001' },
       inGuild: () => true,
+      isButton: () => false,
       isChatInputCommand: () => true,
       options: { getString: () => userOption },
       deferReply: async () => {},

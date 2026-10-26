@@ -11,6 +11,7 @@ const { Events, MessageFlags } = require('discord.js');
 
 const logger = require('../utils/logger');
 const { hasAdminPermission, isOwner } = require('../utils/permissions');
+const { UNBAN_PREFIX, handleUnbanButton } = require('../utils/unbanButton');
 
 module.exports = {
     /** Event name for Discord.js */
@@ -25,6 +26,11 @@ module.exports = {
      * @param {import('discord.js').Interaction} interaction - Discord interaction
      */
     async execute(client, interaction) {
+        // The unban button on ban log messages
+        if (interaction.isButton() && interaction.customId.startsWith(UNBAN_PREFIX)) {
+            return handleUnbanButton(interaction).catch(err => logger.error('Unban button failed', err));
+        }
+
         // Only handle chat input commands (slash commands)
         if (!interaction.isChatInputCommand()) return;
 
