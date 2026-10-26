@@ -275,3 +275,18 @@ CREATE TABLE exempt_roles (
 ---
 
 *Created for secure Discord community management.*
+## Backups and migrations
+
+The schema is managed by versioned migrations (`src/utils/migrations.js`) that run automatically at startup and are recorded in the `schema_migrations` table. Never edit a shipped migration; add a new one.
+
+`npm run backup` writes a gzip-compressed `mysqldump` to `BACKUP_DIR` (default `./backups`) and keeps the newest `BACKUP_KEEP` files (default 14). It needs the `mysqldump` program and uses the `DB_*` settings. Run it daily, for example with cron:
+
+```
+15 3 * * * cd /path/to/VoidSentry && npm run backup
+```
+
+To restore: `gunzip -c backups/voidsentry-YYYYMMDD-HHMMSS.sql.gz | mysql -h HOST -u USER -p DATABASE`.
+
+## Dashboard API
+
+When `STATS_PORT` and `STATS_TOKEN` are set, the stats server also serves the API behind the website dashboard under `/api/` (see `src/utils/dashboardApi.js`). It always requires the bearer token and acts for the Discord user named in `X-Discord-User`; the bot checks that user rights in each server itself. Anyone who holds `STATS_TOKEN` can act as any user, so keep it secret and expose the port only through a tunnel or reverse proxy.

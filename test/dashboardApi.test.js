@@ -31,6 +31,11 @@ const searches = [];
 db.getBanCount = async () => 7;
 db.getUniqueUserCount = async () => 6;
 const purged = [];
+const saved = [];
+const audits = [];
+db.addAudit = async entry => { audits.push(entry); };
+db.getAudit = async () => [{ id: 1, user_id: '44444444444444444', detail: 'dry-run turned on', created_at: new Date('2026-10-02T08:00:00Z') }];
+guildSettings.setDryRun = async (guildId, enabled) => { saved.push([guildId, enabled]); };
 db.getBanCountsByGuild = async () => new Map([[GUILD, 7], [OTHER_GUILD, 2]]);
 db.deleteBansByUser = async userId => { purged.push(userId); return 3; };
 db.searchBans = async (guildId, options) => {
@@ -247,5 +252,51 @@ test('a malformed request target gets a 400 instead of hanging', async () => {
       socket.setTimeout(3000, () => reject(new Error('request hung')));
     });
     assert.equal(status, 400);
+  });
+});
+
+test('settings can be changed by an administrator and the change is logged', async () => {
+  await withServer({ token: TOKEN }, async server => {
+    saved.length = 0;
+    audits.length = 0;
+    const { status, body } = await request(server, `/api/guilds/${GUILD}/settings`, { method: 'POST', body: { dryRun: true } });
+    assert.equal(status, 200);
+    assert.deepEqual(saved, [[GUILD, true]]);
+    assert.equal(audits[0].userId, ADMIN);
+    assert.equal(body.ok, true);
+  });
+});
+
+test('settings cannot be changed by ordinary members or for servers they cannot open', async () => {
+  await withServer({ token: TOKEN }, async server => {
+    saved.length = 0;
+    assert.equal((await request(server, `/api/guilds/${GUILD}/settings`, { user: MEMBER, method: 'POST', body: { dryRun: true } })).status, 404);
+    assert.equal((await request(server, '/api/guilds/10101010101010101/settings', { method: 'POST', body: { dryRun: true } })).status, 404);
+    assert.deepEqual(saved, []);
+  });
+});
+
+test('invalid settings requests are rejected with 422 and nothing is saved', async () => {
+  await withServer({ token: TOKEN }, async server => {
+    saved.length = 0;
+    assert.equal((await request(server, `/api/guilds/${GUILD}/settings`, { method: 'POST', body: { dryRun: 'yes' } })).status, 422);
+    assert.equal((await request(server, `/api/guilds/${GUILD}/settings`, { method: 'POST', body: { nope: 1 } })).status, 422);
+    assert.deepEqual(saved, []);
+  });
+});
+
+test('the audit log is available to the same people', async () => {
+  await withServer({ token: TOKEN }, async server => {
+    const { status, body } = await request(server, `/api/guilds/${GUILD}/audit`);
+    assert.equal(status, 200);
+    assert.equal(body.entries[0].detail, 'dry-run turned on');
+    assert.equal((await request(server, `/api/guilds/${GUILD}/audit`, { user: MEMBER })).status, 404);
+  });
+});
+
+test('writing to read-only routes is still refused', async () => {
+  await withServer({ token: TOKEN }, async server => {
+    assert.equal((await request(server, `/api/guilds/${GUILD}/bans`, { method: 'POST', body: {} })).status, 405);
+    assert.equal((await request(server, `/api/guilds/${GUILD}`, { method: 'POST', body: {} })).status, 405);
   });
 });

@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node index.js",
     "dev": "NODE_ENV=development node index.js",
+    "backup": "node scripts/backup.js",
     "deploy": "node src/utils/deploy.js",
     "deploy:guild": "NODE_ENV=development node src/utils/deploy.js",
     "test": "node --test"

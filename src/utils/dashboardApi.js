@@ -14,6 +14,8 @@
  *   GET  /api/guilds?ids=1,2,3      which of these servers the user may open
  *   GET  /api/guilds/:id            settings, health and totals of one server
  *   GET  /api/guilds/:id/bans       ban history of one server (?page=, ?q=)
+ *   GET  /api/guilds/:id/audit      recent settings changes made through the dashboard
+ *   POST /api/guilds/:id/settings   change settings (see dashboardSettings.js)
  *   GET  /api/admin/overview        every server and the global totals (owner only)
  *   GET  /api/admin/bans            ban history across all servers (owner only)
  *   POST /api/admin/purge-user      delete a user's ban records everywhere (owner only)
@@ -26,13 +28,14 @@ const { PermissionFlagsBits } = require('discord.js');
 const CONFIG = require('../config');
 const db = require('./db');
 const guildSettings = require('./guildSettings');
+const { applySettings, listChannelOptions, listRoleOptions } = require('./dashboardSettings');
 const logger = require('./logger');
 
 const SNOWFLAKE = /^\d{17,20}$/;
 const MAX_IDS = 100;
 const PAGE_SIZE = 25;
 const MAX_QUERY_LENGTH = 100;
-const MAX_BODY_BYTES = 1024;
+const MAX_BODY_BYTES = 4096;
 
 /**
  * The server if the user may manage it through the dashboard, otherwise null.
@@ -88,6 +91,7 @@ async function describeGuild(guild) {
             hasTrapChannel: trapChannelIds.length > 0,
         },
         totals: { bans: Number(bans), uniqueUsers: Number(uniqueUsers) },
+        options: { channels: listChannelOptions(guild), roles: listRoleOptions(guild) },
     };
 }
 
@@ -204,7 +208,8 @@ function createDashboardApi(client) {
                 return send(404, { error: 'not found' });
             }
 
-            if (req.method !== 'GET') return send(405, { error: 'method not allowed' });
+            const isSettingsWrite = req.method === 'POST' && parts[1] === 'guilds' && parts[3] === 'settings';
+            if (req.method !== 'GET' && !isSettingsWrite) return send(405, { error: 'method not allowed' });
 
             if (parts.length === 2 && parts[1] === 'me') return send(200, { isOwner: isBotOwner });
 
@@ -226,6 +231,23 @@ function createDashboardApi(client) {
                 if (!guild) return send(404, { error: 'not found' });
 
                 if (parts.length === 3) return send(200, await describeGuild(guild));
+
+                if (parts[3] === 'settings' && req.method === 'POST') {
+                    const result = await applySettings(guild, userId, await readJson(req));
+                    return send(result.ok ? 200 : 422, result);
+                }
+
+                if (parts[3] === 'audit') {
+                    const rows = await db.getAudit(guild.id);
+                    return send(200, {
+                        entries: rows.map(row => ({
+                            id: row.id,
+                            userId: row.user_id,
+                            detail: row.detail,
+                            createdAt: new Date(row.created_at).toISOString(),
+                        })),
+                    });
+                }
 
                 if (parts[3] === 'bans') {
                     const { page, query } = pagingFrom(url);

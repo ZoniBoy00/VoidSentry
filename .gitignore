@@ -30,3 +30,6 @@ Thumbs.db
 
 # Data (ban history, etc.)
 data/
+
+# Database backups
+backups/

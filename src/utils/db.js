@@ -9,13 +9,14 @@
 
 const mysql = require('mysql2/promise');
 const CONFIG = require('../config');
+const { runMigrations } = require('./migrations');
 
 let pool = null;
 let initPromise = null;
 
 /**
  * Initialize the MySQL connection pool.
- * Creates the database and table if they don't exist.
+ * Brings the schema up to date with the versioned migrations.
  * 
  * @returns {Promise<mysql.Pool>}
  */
@@ -40,46 +41,7 @@ async function initDatabase() {
 
         try {
             await candidate.query('SELECT 1');
-            await candidate.query(`
-        CREATE TABLE IF NOT EXISTS bans (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            user_id VARCHAR(20) NOT NULL,
-            user_tag VARCHAR(100) NOT NULL,
-            guild_id VARCHAR(20) NOT NULL,
-            guild_name VARCHAR(100) NOT NULL,
-            channel_id VARCHAR(20) NOT NULL,
-            channel_name VARCHAR(100) NOT NULL,
-            message_content TEXT,
-            reason VARCHAR(500) NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            INDEX idx_user_id (user_id),
-            INDEX idx_guild_id (guild_id),
-            INDEX idx_created_at (created_at)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            `);
-            await candidate.query(`
-        CREATE TABLE IF NOT EXISTS guild_settings (
-            guild_id VARCHAR(20) NOT NULL PRIMARY KEY,
-            log_channel_id VARCHAR(20) NULL,
-            ban_reason VARCHAR(500) NULL,
-            delete_message_seconds INT NULL,
-            dry_run TINYINT(1) NULL
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            `);
-            await candidate.query(`
-        CREATE TABLE IF NOT EXISTS trap_channels (
-            channel_id VARCHAR(20) NOT NULL PRIMARY KEY,
-            guild_id VARCHAR(20) NOT NULL,
-            INDEX idx_trap_guild_id (guild_id)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            `);
-            await candidate.query(`
-        CREATE TABLE IF NOT EXISTS exempt_roles (
-            guild_id VARCHAR(20) NOT NULL,
-            role_id VARCHAR(20) NOT NULL,
-            PRIMARY KEY (guild_id, role_id)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            `);
+            await runMigrations(candidate);
             pool = candidate;
             return pool;
         } catch (error) {
@@ -359,6 +321,33 @@ async function removeGuildData(guildId) {
     await db.query(`DELETE FROM trap_channels WHERE guild_id = ?`, [guildId]);
     await db.query(`DELETE FROM exempt_roles WHERE guild_id = ?`, [guildId]);
     await db.query(`DELETE FROM guild_settings WHERE guild_id = ?`, [guildId]);
+    await db.query(`DELETE FROM audit_log WHERE guild_id = ?`, [guildId]);
+}
+
+/**
+ * Record a settings change made through the dashboard.
+ *
+ * @param {{guildId: string, userId: string, detail: string}} entry - Who changed what, where
+ */
+async function addAudit({ guildId, userId, detail }) {
+    const db = await getPool();
+    await db.query('INSERT INTO audit_log (guild_id, user_id, detail) VALUES (?, ?, ?)', [guildId, userId, detail.slice(0, 300)]);
+}
+
+/**
+ * Most recent settings changes of a server, newest first.
+ *
+ * @param {string} guildId - Server ID
+ * @param {number} [limit] - Maximum number of entries
+ * @returns {Promise<Object[]>}
+ */
+async function getAudit(guildId, limit = 25) {
+    const db = await getPool();
+    const [rows] = await db.query(
+        'SELECT id, user_id, detail, created_at FROM audit_log WHERE guild_id = ? ORDER BY created_at DESC, id DESC LIMIT ?',
+        [guildId, limit]
+    );
+    return rows;
 }
 
 /**
@@ -440,6 +429,8 @@ module.exports = {
     addTrapChannel,
     removeTrapChannel,
     removeGuildData,
+    addAudit,
+    getAudit,
     addExemptRole,
     removeExemptRole,
     purgeOldMessageContent,
