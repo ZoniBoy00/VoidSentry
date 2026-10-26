@@ -19,13 +19,14 @@ Object.assign(process.env, testEnv);
 
 const handler = require('../src/events/messageCreate');
 const db = require('../src/utils/db');
+const guildSettings = require('../src/utils/guildSettings');
 let storedBans = 0;
 db.addBan = async () => {
   storedBans += 1;
   return storedBans;
 };
 
-function makeMessage({ hasBanPermission = true, bannable = true, banError = null } = {}) {
+function makeMessage({ hasBanPermission = true, bannable = true, banError = null, isAdmin = false, roleIds = [], logSends = null } = {}) {
   const actions = [];
   const guild = {
     id: '12345678901234567',
@@ -37,7 +38,9 @@ function makeMessage({ hasBanPermission = true, bannable = true, banError = null
         if (banError) throw banError;
       },
     },
-    channels: { fetch: async () => null },
+    channels: {
+      fetch: async () => (logSends ? { id: process.env.LOG_CHANNEL_ID, isTextBased: () => true, send: async payload => { logSends.push(payload); } } : null),
+    },
   };
   const author = {
     id: `${Date.now()}${Math.floor(Math.random() * 1000)}`,
@@ -49,9 +52,10 @@ function makeMessage({ hasBanPermission = true, bannable = true, banError = null
   };
   const member = {
     bannable,
+    permissions: { has: () => isAdmin },
     displayName: 'Fixture member',
     joinedAt: new Date('2025-01-01T00:00:00Z'),
-    roles: { cache: { clone: () => new Map() } },
+    roles: { cache: Object.assign(new Map(roleIds.map(id => [id, { id }])), { clone: () => new Map() }) },
     guild,
   };
   const message = {
@@ -89,7 +93,6 @@ test('does not delete the trigger message when the Discord ban request fails', a
   await handler.execute({}, message);
   assert.equal(actions.some(action => action.type === 'ban'), true);
   assert.equal(actions.some(action => action.type === 'delete'), false);
-  assert.equal(actions.some(action => action.type === 'dm'), false);
   assert.equal(storedBans, storedBansBefore);
 });
 
@@ -102,6 +105,52 @@ test('deletes the trigger message only after a successful ban', async () => {
   const dmIndex = actions.findIndex(action => action.type === 'dm');
   assert.notEqual(banIndex, -1);
   assert.ok(deleteIndex > banIndex);
-  assert.ok(dmIndex > banIndex);
+  assert.ok(dmIndex !== -1 && dmIndex < banIndex, 'the DM is sent before the ban');
   assert.equal(storedBans, storedBansBefore + 1);
+});
+
+test('never bans administrators and only removes their message', async () => {
+  const { message, actions } = makeMessage({ isAdmin: true });
+  await handler.execute({}, message);
+  assert.equal(actions.some(action => action.type === 'ban'), false);
+  assert.equal(actions.some(action => action.type === 'dm'), false);
+  assert.equal(actions.some(action => action.type === 'delete'), true);
+});
+
+test('never bans members with an exempt role', async () => {
+  const guildId = '12345678901234567';
+  const roleId = '99999999999999999';
+  db.addExemptRole = async () => {};
+  await guildSettings.addExemptRole(guildId, roleId);
+  const { message, actions } = makeMessage({ roleIds: [roleId] });
+  await handler.execute({}, message);
+  assert.equal(actions.some(action => action.type === 'ban'), false);
+  assert.equal(actions.some(action => action.type === 'delete'), true);
+  await guildSettings.removeExemptRole(guildId, roleId).catch(() => {});
+});
+
+test('reports a missed ban to the log channel', async () => {
+  process.env.LOG_CHANNEL_ID = '55555555555555555';
+  const logSends = [];
+  db.setGuildSetting = async () => {};
+  await guildSettings.setLogChannel('12345678901234567', '55555555555555555');
+  const { message, actions } = makeMessage({ hasBanPermission: false, logSends });
+  await handler.execute({}, message);
+  assert.equal(actions.some(action => action.type === 'ban'), false);
+  assert.equal(logSends.length, 1);
+  assert.match(logSends[0].content, /Ban failed/);
+  await guildSettings.setLogChannel('12345678901234567', null);
+});
+
+test('dry-run reports but does not ban', async () => {
+  db.setGuildSetting = async () => {};
+  await guildSettings.setDryRun('12345678901234567', true);
+  const { message, actions } = makeMessage();
+  const storedBansBefore = storedBans;
+  await handler.execute({}, message);
+  await guildSettings.setDryRun('12345678901234567', false);
+  assert.equal(actions.some(action => action.type === 'ban'), false);
+  assert.equal(actions.some(action => action.type === 'dm'), false);
+  assert.equal(actions.some(action => action.type === 'delete'), false);
+  assert.equal(storedBans, storedBansBefore);
 });

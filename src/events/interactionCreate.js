@@ -7,9 +7,10 @@
  * @module events/interactionCreate
  */
 
-const { Events } = require('discord.js');
+const { Events, MessageFlags } = require('discord.js');
 
 const logger = require('../utils/logger');
+const { hasAdminPermission } = require('../utils/permissions');
 
 module.exports = {
     /** Event name for Discord.js */
@@ -31,6 +32,14 @@ module.exports = {
         const command = client.commands.get(interaction.commandName);
         if (!command) return;
 
+        // Commands flagged adminOnly are server-only and need owner/administrator rights.
+        if (command.adminOnly && (!interaction.inGuild() || !hasAdminPermission(interaction.member))) {
+            return interaction.reply({
+                content: '❌ You do not have permission to use this command.',
+                flags: [MessageFlags.Ephemeral],
+            }).catch(() => {});
+        }
+
         logger.command(`/${interaction.commandName} by ${interaction.user.tag} (${interaction.user.id})`);
 
         try {
@@ -42,9 +51,9 @@ module.exports = {
             const reply = { content: '❌ An error occurred while executing this command.' };
 
             if (interaction.deferred || interaction.replied) {
-                await interaction.editReply(reply).catch(() => {});
+                await interaction.editReply(reply).catch(err => logger.warn(`Could not send error reply: ${err.message}`));
             } else {
-                await interaction.reply({ ...reply, ephemeral: true }).catch(() => {});
+                await interaction.reply({ ...reply, flags: [MessageFlags.Ephemeral] }).catch(err => logger.warn(`Could not send error reply: ${err.message}`));
             }
         }
     },

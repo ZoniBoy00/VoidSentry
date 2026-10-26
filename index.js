@@ -11,7 +11,7 @@
  * @version 2.0.0
  */
 
-const { Client, Collection, GatewayIntentBits } = require('discord.js');
+const { Client, Collection, Events, GatewayIntentBits } = require('discord.js');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -85,6 +85,24 @@ for (const file of eventFiles) {
 }
 
 logger.info(`Loaded ${eventFiles.length} event(s)`);
+
+// Keep the bot visible when Discord connection problems occur.
+client.on(Events.Error, err => logger.error('Discord client error', err));
+client.on(Events.ShardDisconnect, (event, shardId) => logger.warn(`Shard ${shardId} disconnected (code ${event?.code}).`));
+client.on(Events.ShardReconnecting, shardId => logger.warn(`Shard ${shardId} reconnecting...`));
+client.on(Events.ShardResume, shardId => logger.info(`Shard ${shardId} resumed.`));
+
+// A stray rejected promise should be logged, not take down the security bot.
+process.on('unhandledRejection', reason => {
+    logger.error('Unhandled promise rejection', reason instanceof Error ? reason : new Error(String(reason)));
+});
+
+// After an uncaught exception the process state is unreliable: log and exit so a
+// process manager (Docker restart policy, pm2, systemd) can start a clean instance.
+process.on('uncaughtException', err => {
+    logger.fatal('Uncaught exception, exiting', err);
+    process.exit(1);
+});
 
 /**
  * Graceful shutdown handler.

@@ -34,9 +34,11 @@ function requiredDiscordId(name) {
     return value;
 }
 
-function requiredDiscordIdList(name) {
-    const values = requiredEnv(name).split(',').map(value => value.trim()).filter(Boolean);
-    if (values.length === 0 || values.some(value => !DISCORD_ID_REGEX.test(value))) {
+function optionalDiscordIdList(name) {
+    const raw = process.env[name]?.trim();
+    if (!raw) return [];
+    const values = raw.split(',').map(value => value.trim()).filter(Boolean);
+    if (values.some(value => !DISCORD_ID_REGEX.test(value))) {
         throw new Error(`${name} must contain valid comma-separated Discord IDs`);
     }
     return [...new Set(values)];
@@ -57,10 +59,11 @@ if (!/^[A-Za-z0-9_]+$/.test(dbName)) throw new Error('DB_NAME contains unsupport
  * @property {string} CLIENT_ID - Discord application/client ID
  * @property {string} OWNER_ID - Bot owner's Discord user ID
  * @property {string|null} GUILD_ID - Optional guild ID for development
- * @property {string[]} BAN_CHANNEL_IDS - Array of trap channel IDs
- * @property {string|null} LOG_CHANNEL_ID - Log channel ID for ban logs
+ * @property {string[]} BAN_CHANNEL_IDS - Optional global trap channel IDs (per-server channels are stored in the database via /setup-trap)
+ * @property {string|null} LOG_CHANNEL_ID - Default log channel ID (per-server override via /trap-settings)
  * @property {string} STATUS_TEXT - Bot presence status text
  * @property {number} DELETE_MESSAGE_SECONDS - Seconds of messages to delete on ban
+ * @property {number} MESSAGE_RETENTION_DAYS - Days to keep captured message content (0 = forever)
  * @property {string} BAN_REASON - Reason shown in ban audit log
  * @property {Object} DB - MySQL database configuration
  */
@@ -79,8 +82,8 @@ const CONFIG = {
     /** Optional: Guild ID for development (faster command updates) */
     GUILD_ID: process.env.GUILD_ID?.trim() || null,
     
-    /** Array of channel IDs that trigger ban on message */
-    BAN_CHANNEL_IDS: requiredDiscordIdList('BAN_CHANNEL_IDS'),
+    /** Optional global trap channel IDs; per-server channels are managed with /setup-trap */
+    BAN_CHANNEL_IDS: optionalDiscordIdList('BAN_CHANNEL_IDS'),
     
     /** Channel ID for ban log embeds */
     LOG_CHANNEL_ID: process.env.LOG_CHANNEL_ID?.trim() || null,
@@ -91,6 +94,9 @@ const CONFIG = {
     /** How many seconds of messages to delete when banning (default: 24 hours) */
     DELETE_MESSAGE_SECONDS: boundedInteger('DELETE_MESSAGE_SECONDS', 86400, 0, 604800),
     
+    /** Days to keep captured message content in the ban history (0 = keep forever) */
+    MESSAGE_RETENTION_DAYS: boundedInteger('MESSAGE_RETENTION_DAYS', 90, 0, 3650),
+
     /** Ban reason shown in audit log */
     BAN_REASON: (process.env.BAN_REASON?.trim() || 'Security Breach: Sent a message in a Bot Detection Channel.').slice(0, 500),
     

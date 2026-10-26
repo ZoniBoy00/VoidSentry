@@ -1,40 +1,49 @@
 /**
  * Slash command to initialize a trap channel.
- * 
- * Clears the channel of existing messages and posts a warning embed
- * to notify users that sending messages will result in an instant ban.
- * 
+ *
+ * Registers the current channel as a trap for this server, clears it of
+ * existing messages and posts a warning embed to notify users that sending
+ * messages will result in an instant ban.
+ *
  * @module commands/setupTrap
  */
 
-const { SlashCommandBuilder, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags, PermissionFlagsBits } = require('discord.js');
 
-const CONFIG = require('../config');
 const { createWarningEmbed } = require('../embeds/warningEmbed');
 const { createLogoAttachment } = require('../utils/helpers');
-const { hasAdminPermission } = require('../utils/permissions');
+const guildSettings = require('../utils/guildSettings');
 const logger = require('../utils/logger');
 
+/** Minimum time between /setup-trap runs per channel (it clears the channel). */
+const COOLDOWN_MS = 30000;
+const lastRun = new Map();
+
 module.exports = {
+    /** Enforced by the interaction router: server-only, owner or administrator */
+    adminOnly: true,
+
     /** Command definition for Discord */
     data: new SlashCommandBuilder()
         .setName('setup-trap')
-        .setDescription('Initializes the trap: Clears channel and posts warning.'),
+        .setDescription('Registers this channel as a trap: Clears channel and posts warning.')
+        .setDMPermission(false),
 
     /**
      * Execute the setup-trap command.
-     * 
+     *
      * @param {import('discord.js').CommandInteraction} interaction - Discord interaction
      * @returns {Promise<void>}
      */
     async execute(interaction) {
-        // Check permissions (owner or administrator)
-        if (!hasAdminPermission(interaction.member)) {
+        const wait = COOLDOWN_MS - (Date.now() - (lastRun.get(interaction.channelId) || 0));
+        if (wait > 0) {
             return interaction.reply({
-                content: '❌ You do not have permission to use this command.',
+                content: `⏳ This channel was just set up. Try again in ${Math.ceil(wait / 1000)}s.`,
                 flags: [MessageFlags.Ephemeral],
             });
         }
+        lastRun.set(interaction.channelId, Date.now());
 
         await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 
@@ -43,12 +52,12 @@ module.exports = {
             return interaction.editReply({ content: '❌ This command can only be used in a text channel.' });
         }
 
-        // Warn if channel is not in the monitored list
-        if (!CONFIG.BAN_CHANNEL_IDS.includes(channel.id)) {
-            logger.warn(`setup-trap used in non-monitored channel #${channel.name} (${channel.id})`);
-            return interaction.editReply({
-                content: '⚠️ This channel is not in the `BAN_CHANNEL_IDS` list. Setup will proceed, but I won\'t auto-ban here until added.',
-            });
+        // Register the channel for this server
+        try {
+            await guildSettings.addTrapChannel(interaction.guild.id, channel.id);
+        } catch (error) {
+            logger.error(`Failed to register trap channel #${channel.name} (${channel.id}).`, error);
+            return interaction.editReply({ content: '❌ Failed to save the trap channel. Please try again.' });
         }
 
         // Clear up to 50 recent messages; Discord does not bulk-delete messages older than 14 days.
@@ -64,7 +73,13 @@ module.exports = {
             files: [createLogoAttachment()],
         });
 
-        logger.info(`Trap channel #${channel.name} initialized.`);
-        await interaction.editReply({ content: '✅ Trap channel has been initialized.' });
+        logger.info(`Trap channel #${channel.name} (${channel.id}) initialized in ${interaction.guild.name}.`);
+
+        const canBan = interaction.guild.members.me?.permissions?.has(PermissionFlagsBits.BanMembers);
+        await interaction.editReply({
+            content: canBan
+                ? '✅ Trap channel has been initialized.'
+                : '⚠️ Trap channel initialized, but I lack the **Ban Members** permission here, so I cannot ban anyone yet.',
+        });
     },
 };

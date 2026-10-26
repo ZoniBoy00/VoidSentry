@@ -13,28 +13,46 @@ const CONFIG = require('../config');
 const db = require('../utils/db');
 const { COLORS, LOGO_URL, BRAND_LOGGING } = require('../utils/constants');
 const { formatTimestamp, sanitizeEmbedText } = require('../utils/helpers');
-const { hasAdminPermission } = require('../utils/permissions');
 
 const DISCORD_ID_REGEX = /^\d{17,19}$/;
 
+/**
+ * Server to scope queries to. Everyone sees only their own server; the bot owner
+ * can pass `global` to see every server.
+ *
+ * @param {import('discord.js').CommandInteraction} interaction
+ * @returns {string|null} Guild ID, or null for all servers
+ */
+function scopeGuildId(interaction) {
+    if (interaction.user?.id === CONFIG.OWNER_ID && interaction.options.getBoolean('global')) return null;
+    return interaction.guildId;
+}
+
 module.exports = {
+    /** Enforced by the interaction router: server-only, owner or administrator */
+    adminOnly: true,
+
     /** Command definition for Discord */
     data: new SlashCommandBuilder()
         .setName('bans')
         .setDescription('View ban history from the database.')
+        .setDMPermission(false)
         .addSubcommand(sub =>
             sub.setName('recent')
                 .setDescription('Show recent bans')
                 .addIntegerOption(opt => opt.setName('limit').setDescription('Number of bans to show (max 20)').setMinValue(1).setMaxValue(20))
+                .addBooleanOption(opt => opt.setName('global').setDescription('Bot owner only: include all servers'))
         )
         .addSubcommand(sub =>
             sub.setName('search')
                 .setDescription('Search bans by user ID')
                 .addStringOption(opt => opt.setName('user_id').setDescription('Discord User ID').setRequired(true))
+                .addBooleanOption(opt => opt.setName('global').setDescription('Bot owner only: include all servers'))
         )
         .addSubcommand(sub =>
             sub.setName('stats')
                 .setDescription('Show ban statistics')
+                .addBooleanOption(opt => opt.setName('global').setDescription('Bot owner only: include all servers'))
         ),
 
     /**
@@ -44,10 +62,6 @@ module.exports = {
      * @returns {Promise<void>}
      */
     async execute(interaction) {
-        if (!hasAdminPermission(interaction.member)) {
-            return interaction.reply({ content: '❌ No permission.', flags: [MessageFlags.Ephemeral] });
-        }
-
         const subcommand = interaction.options.getSubcommand();
 
         if (subcommand === 'recent') {
@@ -68,7 +82,7 @@ module.exports = {
         const limit = interaction.options.getInteger('limit') || 10;
         
         try {
-            const bans = await db.getBans(limit);
+            const bans = await db.getBans(limit, 0, scopeGuildId(interaction));
             
             if (bans.length === 0) {
                 return interaction.reply({ content: 'ℹ️ No bans in the database.', flags: [MessageFlags.Ephemeral] });
@@ -110,7 +124,7 @@ module.exports = {
         }
 
         try {
-            const bans = await db.findBansByUserId(userId);
+            const bans = await db.findBansByUserId(userId, scopeGuildId(interaction));
 
             if (bans.length === 0) {
                 return interaction.reply({
@@ -153,9 +167,10 @@ module.exports = {
      */
     async showStats(interaction) {
         try {
-            const totalBans = await db.getBanCount();
-            const uniqueUsers = await db.getUniqueUserCount();
-            const guildStats = await db.getGuildStats();
+            const guildId = scopeGuildId(interaction);
+            const totalBans = await db.getBanCount(guildId);
+            const uniqueUsers = await db.getUniqueUserCount(guildId);
+            const guildStats = guildId ? [] : await db.getGuildStats();
 
             const embed = new EmbedBuilder()
                 .setColor(COLORS.INFO)

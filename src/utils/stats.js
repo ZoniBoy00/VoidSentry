@@ -52,13 +52,6 @@ class Stats {
     }
 
     /**
-     * Record a detection without ban (unused in current implementation).
-     */
-    recordDetection() {
-        this.totalDetections++;
-    }
-
-    /**
      * Record successful DM notification.
      */
     recordDmSuccess() {

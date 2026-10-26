@@ -12,17 +12,21 @@ const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js'
 const CONFIG = require('../config');
 const stats = require('../utils/stats');
 const db = require('../utils/db');
+const guildSettings = require('../utils/guildSettings');
 const logger = require('../utils/logger');
 const { COLORS, LOGO_URL, BRAND_NAME } = require('../utils/constants');
 const { createLogoAttachment, formatTimestamp, sanitizeEmbedText } = require('../utils/helpers');
 const { VERSION } = require('../utils/constants');
-const { hasAdminPermission } = require('../utils/permissions');
 
 module.exports = {
+    /** Enforced by the interaction router: server-only, owner or administrator */
+    adminOnly: true,
+
     /** Command definition for Discord */
     data: new SlashCommandBuilder()
         .setName('status')
-        .setDescription('Shows VoidSentry bot status, uptime, and ban statistics.'),
+        .setDescription('Shows VoidSentry bot status, uptime, and ban statistics.')
+        .setDMPermission(false),
 
     /**
      * Execute the status command.
@@ -31,24 +35,20 @@ module.exports = {
      * @returns {Promise<void>}
      */
     async execute(interaction) {
-        // Check permissions
-        if (!hasAdminPermission(interaction.member)) {
-            return interaction.reply({
-                content: '❌ You do not have permission to use this command.',
-                flags: [MessageFlags.Ephemeral],
-            });
-        }
-
         await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 
         const summary = stats.getSummary();
         const client = interaction.client;
+        const guildId = interaction.guildId ?? null;
+        const guildConfig = guildId ? guildSettings.getGuildConfig(guildId) : null;
+        const trapCount = guildId ? guildSettings.listTrapChannels(guildId).length : CONFIG.BAN_CHANNEL_IDS.length;
+        const logChannelId = guildConfig ? guildConfig.logChannelId : CONFIG.LOG_CHANNEL_ID;
         let storedBanCount = null;
         let recentBans = [];
         try {
             [storedBanCount, recentBans] = await Promise.all([
-                db.getBanCount(),
-                db.getBans(5),
+                db.getBanCount(guildId),
+                db.getBans(5, 0, guildId),
             ]);
         } catch (error) {
             logger.error('Failed to load persistent ban history for /status.', error);
@@ -64,12 +64,12 @@ module.exports = {
                 { name: '⏱️ Uptime', value: `\`${summary.uptime}\``, inline: true },
                 { name: '📡 Ping', value: `\`${client.ws.ping}ms\``, inline: true },
                 { name: '🏠 Servers', value: `\`${client.guilds.cache.size}\``, inline: true },
-                { name: '🗄️ Bans in Database', value: storedBanCount === null ? 'Unavailable' : `\`${storedBanCount}\``, inline: true },
+                { name: guildId ? '🗄️ Bans on This Server' : '🗄️ Bans in Database', value: storedBanCount === null ? 'Unavailable' : `\`${storedBanCount}\``, inline: true },
                 { name: '🔨 Bans This Run', value: `\`${summary.totalBans}\``, inline: true },
                 { name: '⚠️ Detections This Run', value: `\`${summary.totalDetections}\``, inline: true },
                 { name: '📨 DM Success This Run', value: `\`${summary.dmSuccessRate}%\``, inline: true },
-                { name: '🪤 Channels', value: `\`${CONFIG.BAN_CHANNEL_IDS.length}\``, inline: true },
-                { name: '📝 Log Channel', value: CONFIG.LOG_CHANNEL_ID ? `<#${CONFIG.LOG_CHANNEL_ID}>` : 'Not set', inline: true },
+                { name: '🪤 Channels', value: `\`${trapCount}\``, inline: true },
+                { name: '📝 Log Channel', value: logChannelId ? `<#${logChannelId}>` : 'Not set', inline: true },
             );
 
         // Show persistent history rather than the process-local recent-ban cache.

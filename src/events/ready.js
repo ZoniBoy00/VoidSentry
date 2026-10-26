@@ -13,6 +13,19 @@ const CONFIG = require('../config');
 const logger = require('../utils/logger');
 const stats = require('../utils/stats');
 const db = require('../utils/db');
+const guildSettings = require('../utils/guildSettings');
+
+const RETENTION_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+/** Periodically clear old captured message content (see MESSAGE_RETENTION_DAYS). */
+function scheduleRetention() {
+    if (!CONFIG.MESSAGE_RETENTION_DAYS) return;
+    const run = () => db.purgeOldMessageContent(CONFIG.MESSAGE_RETENTION_DAYS)
+        .then(count => { if (count > 0) logger.info(`Cleared message content from ${count} old ban record(s).`); })
+        .catch(err => logger.error('Failed to clear old message content.', err));
+    run();
+    setInterval(run, RETENTION_INTERVAL_MS).unref();
+}
 
 module.exports = {
     /** Event name for Discord.js */
@@ -35,6 +48,8 @@ module.exports = {
         try {
             await db.initDatabase();
             logger.system('Database connection established');
+            await guildSettings.load();
+            scheduleRetention();
         } catch (err) {
             logger.fatal('Failed to initialize database. Shutting down:', err);
             await db.closePool().catch(() => {});
@@ -49,7 +64,7 @@ module.exports = {
             status: 'dnd',
         });
 
-        logger.system(`Monitoring ${CONFIG.BAN_CHANNEL_IDS.length} trap channel(s).`);
+        logger.system(`Serving ${client.guilds.cache.size} server(s); ${CONFIG.BAN_CHANNEL_IDS.length} global trap channel(s) configured.`);
         logger.info('VoidSentry is ready and operational.');
     },
 };

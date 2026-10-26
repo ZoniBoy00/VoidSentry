@@ -12,17 +12,20 @@ const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js'
 const CONFIG = require('../config');
 const { COLORS, LOGO_URL, BRAND_LOGGING } = require('../utils/constants');
 const { createLogoAttachment, formatTimestamp, sanitizeEmbedText } = require('../utils/helpers');
-const { hasAdminPermission } = require('../utils/permissions');
 const logger = require('../utils/logger');
 
 /** Regex to validate Discord snowflake IDs (17-19 digits) */
 const DISCORD_ID_REGEX = /^\d{17,19}$/;
 
 module.exports = {
+    /** Enforced by the interaction router: server-only, owner or administrator */
+    adminOnly: true,
+
     /** Command definition for Discord */
     data: new SlashCommandBuilder()
         .setName('ban-info')
         .setDescription('Look up ban information for a user by ID.')
+        .setDMPermission(false)
         .addStringOption(opt => opt.setName('user_id').setDescription('Discord User ID').setRequired(true)),
 
     /**
@@ -32,11 +35,6 @@ module.exports = {
      * @returns {Promise<void>}
      */
     async execute(interaction) {
-        // Check permissions
-        if (!hasAdminPermission(interaction.member)) {
-            return interaction.reply({ content: '❌ No permission.', flags: [MessageFlags.Ephemeral] });
-        }
-
         await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 
         const userId = interaction.options.getString('user_id');
