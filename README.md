@@ -22,6 +22,7 @@ A high-performance Discord security bot designed to catch and remove self-bots a
   - Captured message content
   - Suspicious account age warning (< 7 days old)
 - **Slash Commands**:
+  - `/help` — List all commands (built from the loaded commands, always up to date)
   - `/setup-trap` — Register the current channel as a trap for this server and post the warning
   - `/trap-settings` — View or change this server's trap channels, log channel, ban reason, purge duration, dry-run mode and exempt roles
   - `/add-logchannel [channel]` — Choose where ban logs are posted on this server (any channel, any name)
@@ -34,6 +35,7 @@ A high-performance Discord security bot designed to catch and remove self-bots a
     - `/bans search <user_id>` — Search bans by user ID
     - `/bans stats` — Show database statistics
     - Results are limited to the current server (the bot owner can add `global:true`)
+- **Live Status** — The bot's "Watching" status rotates between your `STATUS_TEXT`, the number of servers and the total number of users banned.
 - **Structured Logging** — Pino-based logger with categories (system, security, ban, detection, command)
 - **Statistics Tracking** — In-memory tracking of bans, detections, and DM success rate
 - **Branded Design** — Custom logo and professional embeds
@@ -50,6 +52,7 @@ VoidSentry/
 │   ├── config/
 │   │   └── index.js               # Environment config, MySQL settings
 │   ├── commands/
+│   │   ├── help.js                 # /help
 │   │   ├── setupTrap.js            # /setup-trap
 │   │   ├── trapSettings.js         # /trap-settings (per-server settings)
 │   │   ├── addLogChannel.js        # /add-logchannel
@@ -74,6 +77,7 @@ VoidSentry/
 │       ├── guildSettings.js       # Per-server settings & trap channels (cached)
 │       ├── helpers.js             # Utility functions
 │       ├── logger.js              # Pino structured logger
+│       ├── presence.js            # Rotating bot status
 │       ├── permissions.js         # Permission checker
 │       ├── stats.js               # In-memory statistics
 │       └── constants.js           # Colors, paths, branding
@@ -108,7 +112,7 @@ Copy `.env.example` to `.env` and fill in your credentials:
 | `GUILD_ID` | Discord Server ID for development (guild commands). |
 | `BAN_CHANNEL_IDS` | Optional. Trap channel IDs, separated by commas, that apply on every server. Normally leave empty and use `/setup-trap` instead. |
 | `LOG_CHANNEL_ID` | Optional default log channel ID. Only works on the server that owns the channel; other servers set theirs with `/trap-settings log-channel`. |
-| `STATUS_TEXT` | Bot status text (default: `Watching for breaches...`). |
+| `STATUS_TEXT` | First line of the rotating bot status (default: `Watching for breaches...`). Server and ban counts are added automatically. |
 | `DELETE_MESSAGE_SECONDS` | Default messages to delete on ban (default: 86400 = 24h). Servers can override it. |
 | `BAN_REASON` | Default ban reason. Servers can override it. |
 | `MESSAGE_RETENTION_DAYS` | Days to keep captured message content in the ban history (default: 90, `0` = keep forever). |
@@ -157,6 +161,7 @@ and the configured user only needs access to that database.
 
 | Command | Description | Permissions |
 | :--- | :--- | :--- |
+| `/help` | List all commands | Everyone |
 | `/setup-trap` | Registers the channel as a trap, clears it and posts the warning | Owner / Administrator |
 | `/trap-settings view` | Show this server's trap channels and settings | Owner / Administrator |
 | `/trap-settings remove-trap [channel]` | Stop treating a channel as a trap | Owner / Administrator |

@@ -28,6 +28,7 @@ const logger = require('../utils/logger');
 const stats = require('../utils/stats');
 const db = require('../utils/db');
 const guildSettings = require('../utils/guildSettings');
+const presence = require('../utils/presence');
 
 /** How long to wait for the pre-ban DM before banning anyway. */
 const DM_TIMEOUT_MS = 3000;
@@ -223,6 +224,7 @@ module.exports = {
 
             // Record statistics
             stats.recordBan(author.id, author.tag, channel.id);
+            presence.recordBan();
             logger.ban(`${author.tag} (${author.id}) removed for trap violation. Messages purged.`);
 
             // Store ban in database

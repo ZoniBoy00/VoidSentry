@@ -14,6 +14,7 @@ const logger = require('../utils/logger');
 const stats = require('../utils/stats');
 const db = require('../utils/db');
 const guildSettings = require('../utils/guildSettings');
+const presence = require('../utils/presence');
 
 const RETENTION_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
@@ -58,11 +59,8 @@ module.exports = {
             return;
         }
 
-        // Set bot presence (status text and dnd status)
-        client.user.setPresence({
-            activities: [{ name: CONFIG.STATUS_TEXT, type: 3 }], // ActivityType.Watching = 3
-            status: 'dnd',
-        });
+        // Rotating presence: status text, server count, total bans
+        await presence.start(client);
 
         logger.system(`Serving ${client.guilds.cache.size} server(s); ${CONFIG.BAN_CHANNEL_IDS.length} global trap channel(s) configured.`);
         logger.info('VoidSentry is ready and operational.');
