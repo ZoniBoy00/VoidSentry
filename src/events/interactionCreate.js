@@ -10,7 +10,7 @@
 const { Events, MessageFlags } = require('discord.js');
 
 const logger = require('../utils/logger');
-const { hasAdminPermission } = require('../utils/permissions');
+const { hasAdminPermission, isOwner } = require('../utils/permissions');
 
 module.exports = {
     /** Event name for Discord.js */
@@ -31,6 +31,14 @@ module.exports = {
         // Get command from collection
         const command = client.commands.get(interaction.commandName);
         if (!command) return;
+
+        // Commands flagged ownerOnly are for the bot owner (OWNER_ID) only.
+        if (command.ownerOnly && !isOwner(interaction.user)) {
+            return interaction.reply({
+                content: '❌ This command is only available to the bot owner.',
+                flags: [MessageFlags.Ephemeral],
+            }).catch(() => {});
+        }
 
         // Commands flagged adminOnly are server-only and need owner/administrator rights.
         if (command.adminOnly && (!interaction.inGuild() || !hasAdminPermission(interaction.member))) {

@@ -20,7 +20,7 @@ const { createLogoAttachment } = require('../utils/helpers');
  */
 function describeCommand(command) {
     const json = command.data.toJSON();
-    const lock = command.adminOnly ? ' 🔒' : '';
+    const lock = command.ownerOnly ? ' 👑' : command.adminOnly ? ' 🔒' : '';
     const subcommands = (json.options || []).filter(opt => opt.type === ApplicationCommandOptionType.Subcommand);
 
     const lines = subcommands.length > 0
@@ -53,7 +53,7 @@ module.exports = {
             .setDescription(
                 'VoidSentry watches **trap channels**. Anyone who writes in one is banned instantly, which catches self-bots and compromised accounts.\n\n' +
                 '**Quick start:** run `/setup-trap` in the channel you want as a trap, then pick a log channel with `/add-logchannel`.\n' +
-                '🔒 = server owner / administrator only.'
+                '🔒 = server owner / administrator only. 👑 = bot owner only.'
             )
             .addFields(commands.map(describeCommand))
             .setFooter({ text: `${BRAND_NAME} v${VERSION}`, iconURL: LOGO_URL });

@@ -325,6 +325,18 @@ async function removeExemptRole(guildId, roleId) {
 }
 
 /**
+ * Delete every ban record of a user on all servers (data deletion request).
+ * 
+ * @param {string} userId - Discord user ID
+ * @returns {Promise<number>} Number of records deleted
+ */
+async function deleteBansByUser(userId) {
+    const db = await getPool();
+    const [result] = await db.query(`DELETE FROM bans WHERE user_id = ?`, [userId]);
+    return result.affectedRows;
+}
+
+/**
  * Clear captured message content from bans older than the retention period.
  * The ban record itself is kept.
  * 
@@ -369,5 +381,6 @@ module.exports = {
     addExemptRole,
     removeExemptRole,
     purgeOldMessageContent,
+    deleteBansByUser,
     closePool,
 };

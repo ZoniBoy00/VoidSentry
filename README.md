@@ -28,6 +28,7 @@ A high-performance Discord security bot designed to catch and remove self-bots a
   - `/add-logchannel [channel]` — Choose where ban logs are posted on this server (any channel, any name)
   - `/remove-logchannel` — Stop posting ban logs
   - `/unban` — Unban a user by ID (ban history is kept)
+  - `/purge-user` — Bot owner only: delete all stored ban records of a user (data deletion requests)
   - `/status` — View bot uptime, statistics, and recent bans
   - `/ban-info` — Look up ban information for a user by ID (Discord ban lookup)
   - `/bans` — Ban history from database:
@@ -58,6 +59,7 @@ VoidSentry/
 │   │   ├── addLogChannel.js        # /add-logchannel
 │   │   ├── removeLogChannel.js     # /remove-logchannel
 │   │   ├── unban.js                # /unban
+│   │   ├── purgeUser.js            # /purge-user (bot owner only)
 │   │   ├── status.js              # /status
 │   │   ├── banInfo.js             # /ban-info (Discord ban lookup)
 │   │   └── bans.js                # /bans (database history)
@@ -174,6 +176,7 @@ and the configured user only needs access to that database.
 | `/trap-settings exempt-add <role>` | Never ban members with this role | Owner / Administrator |
 | `/trap-settings exempt-remove <role>` | Remove a role exemption | Owner / Administrator |
 | `/unban <user_id>` | Unban a user on this server | Owner / Administrator |
+| `/purge-user <user_id>` | Delete all stored ban records of a user on every server | Bot owner only |
 | `/status` | Bot uptime, stats, ping, recent bans | Owner / Administrator |
 | `/ban-info` | Look up Discord ban by user ID | Owner / Administrator |
 | `/bans recent [limit]` | Recent bans from database | Owner / Administrator |

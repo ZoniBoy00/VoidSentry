@@ -52,6 +52,15 @@ class Stats {
     }
 
     /**
+     * Drop a user from the in-memory recent-ban list (data deletion request).
+     * 
+     * @param {string} userId - Discord user ID
+     */
+    forgetUser(userId) {
+        this.recentBans = this.recentBans.filter(ban => ban.userId !== userId);
+    }
+
+    /**
      * Record successful DM notification.
      */
     recordDmSuccess() {
