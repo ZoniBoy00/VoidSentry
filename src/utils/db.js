@@ -200,6 +200,21 @@ async function getBanCount(guildId = null) {
 }
 
 /**
+ * Get the number of bans in the last N days (all servers).
+ * 
+ * @param {number} days - Window size in days
+ * @returns {Promise<number>}
+ */
+async function getBanCountSince(days) {
+    const db = await getPool();
+    const [rows] = await db.query(
+        `SELECT COUNT(*) as count FROM bans WHERE created_at >= (NOW() - INTERVAL ? DAY)`,
+        [days]
+    );
+    return rows[0].count;
+}
+
+/**
  * Get ban statistics grouped by guild.
  *
  * @returns {Promise<Object[]>} Array of guild stats
@@ -371,6 +386,7 @@ module.exports = {
     findBansByUserId,
     getBans,
     getBanCount,
+    getBanCountSince,
     getGuildStats,
     getUniqueUserCount,
     loadGuildSettings,

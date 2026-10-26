@@ -15,6 +15,7 @@ const stats = require('../utils/stats');
 const db = require('../utils/db');
 const guildSettings = require('../utils/guildSettings');
 const presence = require('../utils/presence');
+const { startStatsServer } = require('../utils/statsServer');
 
 const RETENTION_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
@@ -61,6 +62,15 @@ module.exports = {
 
         // Rotating presence: status text, server count, total bans
         await presence.start(client);
+
+        // Optional public stats endpoint for the website
+        if (CONFIG.STATS_PORT) {
+            try {
+                await startStatsServer(client, { port: CONFIG.STATS_PORT, host: CONFIG.STATS_HOST, token: CONFIG.STATS_TOKEN });
+            } catch (err) {
+                logger.error(`Could not start the stats endpoint on port ${CONFIG.STATS_PORT}.`, err);
+            }
+        }
 
         logger.system(`Serving ${client.guilds.cache.size} server(s); ${CONFIG.BAN_CHANNEL_IDS.length} global trap channel(s) configured.`);
         logger.info('VoidSentry is ready and operational.');

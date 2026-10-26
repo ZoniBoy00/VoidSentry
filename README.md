@@ -80,6 +80,7 @@ VoidSentry/
 │       ├── helpers.js             # Utility functions
 │       ├── logger.js              # Pino structured logger
 │       ├── presence.js            # Rotating bot status
+│       ├── statsServer.js         # Optional read-only stats endpoint
 │       ├── permissions.js         # Permission checker
 │       ├── stats.js               # In-memory statistics
 │       └── constants.js           # Colors, paths, branding
@@ -117,6 +118,9 @@ Copy `.env.example` to `.env` and fill in your credentials:
 | `STATUS_TEXT` | First line of the rotating bot status (default: `Watching for breaches...`). Server and ban counts are added automatically. |
 | `DELETE_MESSAGE_SECONDS` | Default messages to delete on ban (default: 86400 = 24h). Servers can override it. |
 | `BAN_REASON` | Default ban reason. Servers can override it. |
+| `STATS_PORT` | Optional. Port of a read-only JSON endpoint (`GET /stats`) with aggregate numbers (servers, members, total bans, bans in the last 7 days) for the website. `0` or empty = disabled. |
+| `STATS_HOST` | Interface for the stats endpoint (default `127.0.0.1`). Keep it on localhost and expose it through a tunnel or reverse proxy. |
+| `STATS_TOKEN` | Optional bearer token the stats endpoint requires. |
 | `MESSAGE_RETENTION_DAYS` | Days to keep captured message content in the ban history (default: 90, `0` = keep forever). |
 | `NODE_ENV` | `development` for guild commands, `production` for global. |
 

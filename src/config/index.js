@@ -65,6 +65,9 @@ if (!/^[A-Za-z0-9_]+$/.test(dbName)) throw new Error('DB_NAME contains unsupport
  * @property {number} DELETE_MESSAGE_SECONDS - Seconds of messages to delete on ban
  * @property {number} MESSAGE_RETENTION_DAYS - Days to keep captured message content (0 = forever)
  * @property {string} BAN_REASON - Reason shown in ban audit log
+ * @property {number} STATS_PORT - Port for the public stats endpoint (0 = disabled)
+ * @property {string} STATS_HOST - Interface the stats endpoint listens on
+ * @property {string|null} STATS_TOKEN - Optional bearer token required by the stats endpoint
  * @property {Object} DB - MySQL database configuration
  */
 
@@ -100,6 +103,15 @@ const CONFIG = {
     /** Ban reason shown in audit log */
     BAN_REASON: (process.env.BAN_REASON?.trim() || 'Security Breach: Sent a message in a Bot Detection Channel.').slice(0, 500),
     
+    /** Port of the read-only stats endpoint used by the website (0 = disabled) */
+    STATS_PORT: boundedInteger('STATS_PORT', 0, 0, 65535),
+
+    /** Interface for the stats endpoint (localhost unless you deliberately expose it) */
+    STATS_HOST: process.env.STATS_HOST?.trim() || '127.0.0.1',
+
+    /** If set, the stats endpoint requires "Authorization: Bearer <token>" */
+    STATS_TOKEN: process.env.STATS_TOKEN?.trim() || null,
+
     /** MySQL database configuration */
     DB: {
         host: dbHost,
