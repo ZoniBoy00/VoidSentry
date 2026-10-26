@@ -87,7 +87,7 @@ function createStatsServer(client, { token = null } = {}) {
         return inflight;
     }
 
-    return http.createServer(async (req, res) => {
+    const server = http.createServer(async (req, res) => {
         const send = (status, body) => {
             res.writeHead(status, {
                 'Content-Type': 'application/json; charset=utf-8',
@@ -97,7 +97,13 @@ function createStatsServer(client, { token = null } = {}) {
             res.end(JSON.stringify(body));
         };
 
-        const url = new URL(req.url || '/', 'http://localhost');
+        // A malformed request target (for example "//") must get an answer, not hang the connection.
+        let url;
+        try {
+            url = new URL(req.url || '/', 'http://localhost');
+        } catch {
+            return send(400, { error: 'bad request' });
+        }
         const path = url.pathname;
         const isApi = path.startsWith('/api/');
         if (!isApi && (req.method !== 'GET' || path !== '/stats')) return send(404, { error: 'not found' });
@@ -120,6 +126,11 @@ function createStatsServer(client, { token = null } = {}) {
             send(503, { error: 'stats unavailable' });
         }
     });
+
+    // The endpoint can be reached from the internet through a tunnel: do not let slow clients hold sockets open.
+    server.requestTimeout = 15 * 1000;
+    server.headersTimeout = 10 * 1000;
+    return server;
 }
 
 /**

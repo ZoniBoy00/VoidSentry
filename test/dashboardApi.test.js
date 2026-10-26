@@ -233,3 +233,19 @@ test('the owner can delete a user from all ban records, and bad IDs are refused'
     assert.equal(purged.length, 1);
   });
 });
+
+test('a malformed request target gets a 400 instead of hanging', async () => {
+  await withServer({ token: TOKEN }, async server => {
+    const status = await new Promise((resolve, reject) => {
+      const socket = require('node:net').connect(server.address().port, '127.0.0.1', () => {
+        socket.write('GET // HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n');
+      });
+      let data = '';
+      socket.on('data', chunk => { data += chunk; });
+      socket.on('end', () => resolve(Number(data.split(' ')[1])));
+      socket.on('error', reject);
+      socket.setTimeout(3000, () => reject(new Error('request hung')));
+    });
+    assert.equal(status, 400);
+  });
+});
