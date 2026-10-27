@@ -67,6 +67,17 @@ const MIGRATIONS = [
             ) ${TABLE_OPTIONS}`,
         ],
     },
+    {
+        version: 3,
+        name: 'dashboard session revocation',
+        statements: [
+            // Dashboard sessions of a user issued before revoked_before (Unix seconds) are refused.
+            `CREATE TABLE IF NOT EXISTS session_revocations (
+                user_id VARCHAR(20) NOT NULL PRIMARY KEY,
+                revoked_before BIGINT NOT NULL
+            ) ${TABLE_OPTIONS}`,
+        ],
+    },
 ];
 
 /**

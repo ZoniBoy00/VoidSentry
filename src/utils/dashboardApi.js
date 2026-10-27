@@ -9,13 +9,20 @@
  *
  * The bot owner (OWNER_ID) may open every server and use the /api/admin routes.
  *
+ * The website sends the issue time of the user's session in X-Session-Issued;
+ * sessions issued before the user's last "sign out everywhere" get 403. Each
+ * user, and all users together, are rate limited (429).
+ *
  * Routes:
  *   GET  /api/me                    whether the user is the bot owner
+ *   POST /api/me/revoke             sign the user out of every dashboard session
  *   GET  /api/guilds?ids=1,2,3      which of these servers the user may open
  *   GET  /api/guilds/:id            settings, health and totals of one server
  *   GET  /api/guilds/:id/bans       ban history of one server (?page=, ?q=)
+ *   GET  /api/guilds/:id/export     the newest 2,000 bans of one server, for a CSV download
  *   GET  /api/guilds/:id/audit      recent settings changes made through the dashboard
  *   POST /api/guilds/:id/settings   change settings (see dashboardSettings.js)
+ *   POST /api/guilds/:id/unban      lift a Discord ban ({userId}), with an audit entry
  *   GET  /api/admin/overview        every server and the global totals (owner only)
  *   GET  /api/admin/bans            ban history across all servers (owner only)
  *   POST /api/admin/purge-user      delete a user's ban records everywhere (owner only)
@@ -30,12 +37,28 @@ const db = require('./db');
 const guildSettings = require('./guildSettings');
 const { applySettings, listChannelOptions, listRoleOptions } = require('./dashboardSettings');
 const logger = require('./logger');
+const { createRateLimiter } = require('./rateLimit');
+const sessionRevocations = require('./sessionRevocations');
 
 const SNOWFLAKE = /^\d{17,20}$/;
 const MAX_IDS = 100;
 const PAGE_SIZE = 25;
 const MAX_QUERY_LENGTH = 100;
 const MAX_BODY_BYTES = 4096;
+/**
+ * Most bans one export returns, newest first, and how much of each message it
+ * includes. Together they keep the answer to about 2 MB at worst, which crosses
+ * the tunnel in time and fits the website host's response size limit.
+ */
+const EXPORT_LIMIT = 2000;
+const EXPORT_MESSAGE_LENGTH = 500;
+
+/**
+ * Requests per minute. A server page makes three requests and a saved change
+ * four, so a person clicking around stays far below the per-user limit.
+ * Searches hit the database hardest and have their own, lower limit.
+ */
+const DEFAULT_LIMITS = { perUser: 120, searchesPerUser: 20, total: 1200, windowMs: 60 * 1000 };
 
 /**
  * The server if the user may manage it through the dashboard, otherwise null.
@@ -147,9 +170,15 @@ function readJson(req) {
  * Create the request handler for /api/* paths.
  *
  * @param {import('discord.js').Client} client - Discord client
+ * @param {{limits?: Partial<typeof DEFAULT_LIMITS>}} [options] - Overridable for tests
  * @returns {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, url: URL) => Promise<void>}
  */
-function createDashboardApi(client) {
+function createDashboardApi(client, { limits = {} } = {}) {
+    const { perUser, searchesPerUser, total, windowMs } = { ...DEFAULT_LIMITS, ...limits };
+    const userLimiter = createRateLimiter({ limit: perUser, windowMs });
+    const searchLimiter = createRateLimiter({ limit: searchesPerUser, windowMs });
+    const totalLimiter = createRateLimiter({ limit: total, windowMs });
+
     return async function handle(req, res, url) {
         const send = (status, body) => {
             res.writeHead(status, {
@@ -163,9 +192,25 @@ function createDashboardApi(client) {
         const userId = String(req.headers['x-discord-user'] || '');
         if (!SNOWFLAKE.test(userId)) return send(400, { error: 'missing or invalid X-Discord-User' });
 
+        // Checked before every route, the owner's included. A missing header counts as issued at 0.
+        const issuedAt = Number.parseInt(String(req.headers['x-session-issued'] || '0'), 10) || 0;
+        if (sessionRevocations.isRevoked(userId, issuedAt)) return send(403, { error: 'session revoked' });
+
+        // An export reads a whole ban history, so it counts against the search limit too.
+        const isSearch = Boolean(url.searchParams.get('q')) || url.pathname.endsWith('/export');
+        // Every limiter counts the request, so one that is already over does not hide the others.
+        const allowed = [userLimiter.hit(userId), !isSearch || searchLimiter.hit(userId), totalLimiter.hit('all')];
+        if (allowed.includes(false)) return send(429, { error: 'too many requests' });
+
         try {
             const parts = url.pathname.split('/').filter(Boolean); // ['api', 'guilds', id?, 'bans'?]
             const isBotOwner = userId === CONFIG.OWNER_ID;
+
+            if (req.method === 'POST' && parts.length === 3 && parts[1] === 'me' && parts[2] === 'revoke') {
+                await sessionRevocations.revokeAll(userId);
+                logger.info(`Dashboard: ${userId} signed out of every session.`);
+                return send(200, { ok: true });
+            }
 
             if (parts[1] === 'admin') {
                 // Same answer as for a route that does not exist.
@@ -208,8 +253,8 @@ function createDashboardApi(client) {
                 return send(404, { error: 'not found' });
             }
 
-            const isSettingsWrite = req.method === 'POST' && parts[1] === 'guilds' && parts[3] === 'settings';
-            if (req.method !== 'GET' && !isSettingsWrite) return send(405, { error: 'method not allowed' });
+            const isGuildWrite = req.method === 'POST' && parts[1] === 'guilds' && (parts[3] === 'settings' || parts[3] === 'unban');
+            if (req.method !== 'GET' && !isGuildWrite) return send(405, { error: 'method not allowed' });
 
             if (parts.length === 2 && parts[1] === 'me') return send(200, { isOwner: isBotOwner });
 
@@ -237,6 +282,26 @@ function createDashboardApi(client) {
                     return send(result.ok ? 200 : 422, result);
                 }
 
+                if (parts[3] === 'unban' && req.method === 'POST') {
+                    const body = await readJson(req);
+                    const target = String(body?.userId ?? '');
+                    if (!SNOWFLAKE.test(target)) return send(422, { ok: false, error: 'Invalid user ID.' });
+                    try {
+                        await guild.members.unban(target, `Unbanned by dashboard user ${userId} via VoidSentry`);
+                    } catch (error) {
+                        // 10026 = Unknown Ban: already lifted, which is the state the user wanted.
+                        if (error?.code !== 10026) {
+                            logger.error(`Failed to unban ${target} in guild ${guild.id} from the dashboard.`, error);
+                            return send(422, { ok: false, error: 'Could not unban. Check that VoidSentry has the Ban Members permission.' });
+                        }
+                    }
+                    const detail = `user ${target} unbanned`;
+                    await db.addAudit({ guildId: guild.id, userId, detail })
+                        .catch(error => logger.error('Could not write the audit log entry.', error));
+                    logger.info(`Dashboard: ${userId} unbanned ${target} in ${guild.name} (${guild.id}).`);
+                    return send(200, { ok: true });
+                }
+
                 if (parts[3] === 'audit') {
                     const rows = await db.getAudit(guild.id);
                     return send(200, {
@@ -247,6 +312,15 @@ function createDashboardApi(client) {
                             createdAt: new Date(row.created_at).toISOString(),
                         })),
                     });
+                }
+
+                if (parts[3] === 'export') {
+                    const { total, rows } = await db.searchBans(guild.id, { limit: EXPORT_LIMIT });
+                    const bans = rows.map(banJson).map(ban => ({
+                        ...ban,
+                        messageContent: ban.messageContent?.slice(0, EXPORT_MESSAGE_LENGTH) ?? null,
+                    }));
+                    return send(200, { total, truncated: total > rows.length, bans });
                 }
 
                 if (parts[3] === 'bans') {

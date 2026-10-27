@@ -15,6 +15,7 @@ const stats = require('../utils/stats');
 const db = require('../utils/db');
 const guildSettings = require('../utils/guildSettings');
 const presence = require('../utils/presence');
+const sessionRevocations = require('../utils/sessionRevocations');
 const { startStatsServer } = require('../utils/statsServer');
 
 const RETENTION_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -51,6 +52,8 @@ module.exports = {
             await db.initDatabase();
             logger.system('Database connection established');
             await guildSettings.load();
+            // Only the dashboard API uses session revocations.
+            if (CONFIG.DASHBOARD_API && CONFIG.STATS_TOKEN) await sessionRevocations.load();
             scheduleRetention();
         } catch (err) {
             logger.fatal('Failed to initialize database. Shutting down:', err);
@@ -66,7 +69,13 @@ module.exports = {
         // Optional public stats endpoint for the website
         if (CONFIG.STATS_PORT) {
             try {
-                await startStatsServer(client, { port: CONFIG.STATS_PORT, host: CONFIG.STATS_HOST, token: CONFIG.STATS_TOKEN });
+                await startStatsServer(client, {
+                    port: CONFIG.STATS_PORT,
+                    host: CONFIG.STATS_HOST,
+                    token: CONFIG.STATS_TOKEN,
+                    previousToken: CONFIG.STATS_TOKEN_PREVIOUS,
+                    dashboard: CONFIG.DASHBOARD_API,
+                });
             } catch (err) {
                 logger.error(`Could not start the stats endpoint on port ${CONFIG.STATS_PORT}.`, err);
             }

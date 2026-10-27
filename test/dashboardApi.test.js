@@ -33,6 +33,8 @@ db.getUniqueUserCount = async () => 6;
 const purged = [];
 const saved = [];
 const audits = [];
+const unbanned = [];
+let unbanError = null;
 db.addAudit = async entry => { audits.push(entry); };
 db.getAudit = async () => [{ id: 1, user_id: '44444444444444444', detail: 'dry-run turned on', created_at: new Date('2026-10-02T08:00:00Z') }];
 guildSettings.setDryRun = async (guildId, enabled) => { saved.push([guildId, enabled]); };
@@ -62,6 +64,10 @@ function makeGuild(id, name, { canBan = true } = {}) {
     memberCount: 120,
     iconURL: () => 'https://cdn.example/icon.png',
     members: {
+      unban: async (userId, reason) => {
+        if (unbanError) throw unbanError;
+        unbanned.push({ guildId: id, userId, reason });
+      },
       me: { permissions: { has: () => canBan } },
       fetch: async userId => {
         const member = members.get(userId);
@@ -77,10 +83,15 @@ function makeGuild(id, name, { canBan = true } = {}) {
 const guilds = new Map([[GUILD, makeGuild(GUILD, 'Main server')], [OTHER_GUILD, makeGuild(OTHER_GUILD, 'Other', { canBan: false })]]);
 const client = { guilds: { cache: guilds } };
 
-function request(server, path, { user = ADMIN, token = TOKEN, method = 'GET', body = null } = {}) {
+const revocations = new Map();
+db.loadSessionRevocations = async () => [];
+db.setSessionRevocation = async (userId, before) => { revocations.set(userId, before); };
+
+function request(server, path, { user = ADMIN, token = TOKEN, method = 'GET', body = null, issued = null } = {}) {
   const headers = {};
   if (token) headers.authorization = `Bearer ${token}`;
   if (user) headers['x-discord-user'] = user;
+  if (issued !== null) headers['x-session-issued'] = String(issued);
   return new Promise((resolve, reject) => {
     const req = http.request({ host: '127.0.0.1', port: server.address().port, path, method, headers }, res => {
       let body = '';
@@ -285,12 +296,123 @@ test('invalid settings requests are rejected with 422 and nothing is saved', asy
   });
 });
 
+test('an administrator can unban a user and the unban is logged', async () => {
+  await withServer({ token: TOKEN }, async server => {
+    unbanned.length = 0;
+    audits.length = 0;
+    unbanError = null;
+    const { status, body } = await request(server, `/api/guilds/${GUILD}/unban`, { method: 'POST', body: { userId: '77777777777777777' } });
+    assert.equal(status, 200);
+    assert.equal(body.ok, true);
+    assert.equal(unbanned.length, 1);
+    assert.equal(unbanned[0].userId, '77777777777777777');
+    assert.match(unbanned[0].reason, new RegExp(ADMIN));
+    assert.equal(audits[0].userId, ADMIN);
+    assert.match(audits[0].detail, /77777777777777777 unbanned/);
+  });
+});
+
+test('unban is refused for members, unknown servers and invalid IDs', async () => {
+  await withServer({ token: TOKEN }, async server => {
+    unbanned.length = 0;
+    unbanError = null;
+    const target = { userId: '77777777777777777' };
+    assert.equal((await request(server, `/api/guilds/${GUILD}/unban`, { user: MEMBER, method: 'POST', body: target })).status, 404);
+    assert.equal((await request(server, '/api/guilds/10101010101010101/unban', { method: 'POST', body: target })).status, 404);
+    assert.equal((await request(server, `/api/guilds/${GUILD}/unban`, { method: 'POST', body: { userId: 'abc' } })).status, 422);
+    assert.equal((await request(server, `/api/guilds/${GUILD}/unban`, { method: 'GET' })).status, 404);
+    assert.deepEqual(unbanned, []);
+  });
+});
+
+test('unban treats an already lifted ban as success and reports other failures', async () => {
+  await withServer({ token: TOKEN }, async server => {
+    audits.length = 0;
+    unbanError = Object.assign(new Error('Unknown Ban'), { code: 10026 });
+    assert.equal((await request(server, `/api/guilds/${GUILD}/unban`, { method: 'POST', body: { userId: '77777777777777777' } })).status, 200);
+    assert.equal(audits.length, 1);
+
+    audits.length = 0;
+    unbanError = Object.assign(new Error('Missing Permissions'), { code: 50013 });
+    const failed = await request(server, `/api/guilds/${GUILD}/unban`, { method: 'POST', body: { userId: '77777777777777777' } });
+    assert.equal(failed.status, 422);
+    assert.match(failed.body.error, /Ban Members/);
+    assert.equal(audits.length, 0);
+    unbanError = null;
+  });
+});
+
+test('an administrator can export the ban history; members cannot', async () => {
+  await withServer({ token: TOKEN }, async server => {
+    searches.length = 0;
+    const { status, body } = await request(server, `/api/guilds/${GUILD}/export`);
+    assert.equal(status, 200);
+    assert.equal(body.bans[0].userTag, 'spammer#0001');
+    assert.equal(body.truncated, true, '51 bans in total, 1 row returned by the stub');
+    assert.equal(searches[0].guildId, GUILD);
+    assert.equal(searches[0].limit, 2000);
+    assert.equal((await request(server, `/api/guilds/${GUILD}/export`, { user: MEMBER })).status, 404);
+  });
+});
+
 test('the audit log is available to the same people', async () => {
   await withServer({ token: TOKEN }, async server => {
     const { status, body } = await request(server, `/api/guilds/${GUILD}/audit`);
     assert.equal(status, 200);
     assert.equal(body.entries[0].detail, 'dry-run turned on');
     assert.equal((await request(server, `/api/guilds/${GUILD}/audit`, { user: MEMBER })).status, 404);
+  });
+});
+
+test('with the dashboard API switched off only /stats is served, even with a token', async () => {
+  await withServer({ token: TOKEN, dashboard: false }, async server => {
+    assert.equal((await request(server, '/api/me')).status, 404);
+    assert.equal((await request(server, `/api/guilds/${GUILD}`)).status, 404);
+  });
+});
+
+test('during a token rotation both the new and the previous token work, others do not', async () => {
+  await withServer({ token: TOKEN, previousToken: 'old-token' }, async server => {
+    assert.equal((await request(server, '/api/me')).status, 200);
+    assert.equal((await request(server, '/api/me', { token: 'old-token' })).status, 200);
+    assert.equal((await request(server, '/api/me', { token: 'other' })).status, 401);
+  });
+  await withServer({ token: TOKEN }, async server => {
+    assert.equal((await request(server, '/api/me', { token: 'old-token' })).status, 401);
+  });
+});
+
+test('signing out everywhere refuses older sessions but not newer ones, for owner routes too', async () => {
+  const sessionRevocations = require('../src/utils/sessionRevocations');
+  await sessionRevocations.load();
+  await withServer({ token: TOKEN }, async server => {
+    const before = Math.floor(Date.now() / 1000) - 60;
+    assert.equal((await request(server, '/api/me/revoke', { method: 'POST', issued: before })).status, 200);
+    assert.ok(revocations.get(ADMIN) > before);
+
+    const refused = await request(server, `/api/guilds/${GUILD}`, { issued: before });
+    assert.equal(refused.status, 403);
+    assert.equal(refused.body.error, 'session revoked');
+    assert.equal((await request(server, `/api/guilds/${GUILD}`)).status, 403, 'a session without an issue time counts as old');
+    assert.equal((await request(server, `/api/guilds/${GUILD}`, { issued: revocations.get(ADMIN) })).status, 200);
+    // Other users are not affected.
+    assert.equal((await request(server, `/api/guilds/${GUILD}`, { user: SERVER_OWNER, issued: before })).status, 200);
+
+    await request(server, '/api/me/revoke', { user: BOT_OWNER, method: 'POST' });
+    assert.equal((await request(server, '/api/admin/overview', { user: BOT_OWNER, issued: before })).status, 403);
+  });
+  await sessionRevocations.load();
+});
+
+test('requests over the per-user, search and total limits get 429', async () => {
+  await withServer({ token: TOKEN, limits: { perUser: 3, searchesPerUser: 1, total: 5 } }, async server => {
+    assert.equal((await request(server, `/api/guilds/${GUILD}/bans?q=a`)).status, 200);
+    assert.equal((await request(server, `/api/guilds/${GUILD}/bans?q=b`)).status, 429, 'second search');
+    assert.equal((await request(server, '/api/me')).status, 200);
+    assert.equal((await request(server, '/api/me')).status, 429, 'fourth request of the same user');
+    // A different user has their own budget until the shared total runs out.
+    assert.equal((await request(server, '/api/me', { user: SERVER_OWNER })).status, 200);
+    assert.equal((await request(server, '/api/me', { user: SERVER_OWNER })).status, 429, 'total of 5 reached');
   });
 });
 

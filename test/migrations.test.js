@@ -47,7 +47,7 @@ test('a fresh database gets every migration, once, in order', async () => {
 test('migrations that already ran are skipped', async () => {
   const pool = fakePool([1]);
   const applied = await runMigrations(pool);
-  assert.deepEqual(applied, [2]);
+  assert.deepEqual(applied, MIGRATIONS.map(migration => migration.version).filter(version => version !== 1));
   assert.equal(pool.statements.some(sql => /CREATE TABLE IF NOT EXISTS bans/.test(sql)), false);
 });
 

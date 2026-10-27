@@ -33,6 +33,22 @@ test('rejects empty database credentials', () => {
   assert.match(result.stderr, /DB_PASSWORD is required/);
 });
 
+test('the dashboard API is on by default and can be switched off', () => {
+  const read = value => spawnSync(process.execPath, ['-e', "process.stdout.write('\\n' + require('./src/config').DASHBOARD_API)"], {
+    cwd: process.cwd(),
+    env: { ...process.env, ...baseEnv, DASHBOARD_API: value },
+    encoding: 'utf8',
+  });
+  // dotenv may print a line of its own first.
+  const value = setting => read(setting).stdout.split('\n').at(-1);
+  assert.equal(value(''), 'true');
+  assert.equal(value('false'), 'false');
+  assert.equal(value('OFF'), 'false');
+  const invalid = read('maybe');
+  assert.notEqual(invalid.status, 0);
+  assert.match(invalid.stderr, /DASHBOARD_API must be true or false/);
+});
+
 test('rejects invalid purge duration', () => {
   const result = spawnSync(process.execPath, ['-e', "require('./src/config')"], {
     cwd: process.cwd(),

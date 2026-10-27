@@ -64,14 +64,16 @@ async function collect(client) {
  * Create (but do not start) the stats HTTP server.
  *
  * @param {import('discord.js').Client} client - Discord client
- * @param {{token?: string|null}} [options] - Optional bearer token required for requests
+ * @param {{token?: string|null, previousToken?: string|null, dashboard?: boolean, limits?: Object}} [options] -
+ *   Optional bearer token required for requests, the token it replaces (still accepted during a rotation),
+ *   whether to serve the dashboard API, and its rate limits
  * @returns {import('node:http').Server}
  */
-function createStatsServer(client, { token = null } = {}) {
+function createStatsServer(client, { token = null, previousToken = null, dashboard = true, limits } = {}) {
     let cached = null;
     let cachedAt = 0;
     let inflight = null;
-    const dashboardApi = createDashboardApi(client);
+    const dashboardApi = dashboard ? createDashboardApi(client, { limits }) : null;
 
     async function getPayload() {
         if (cached && Date.now() - cachedAt < CACHE_MS) return cached;
@@ -108,13 +110,17 @@ function createStatsServer(client, { token = null } = {}) {
         const isApi = path.startsWith('/api/');
         if (!isApi && (req.method !== 'GET' || path !== '/stats')) return send(404, { error: 'not found' });
 
-        // The dashboard API exposes per-server data, so it is never available without a token.
-        if (isApi && !token) return send(404, { error: 'not found' });
+        // The dashboard API exposes per-server data, so it is never available without a token,
+        // and not at all when it is switched off (DASHBOARD_API=false).
+        if (isApi && (!token || !dashboardApi)) return send(404, { error: 'not found' });
 
         if (token) {
             const header = req.headers.authorization || '';
             const presented = header.startsWith('Bearer ') ? header.slice(7) : '';
-            if (!presented || !tokenMatches(presented, token)) return send(401, { error: 'unauthorized' });
+            // Both comparisons always run, so the answer time does not tell which token matched.
+            const current = Boolean(presented) && tokenMatches(presented, token);
+            const previous = Boolean(presented) && Boolean(previousToken) && tokenMatches(presented, previousToken);
+            if (!current && !previous) return send(401, { error: 'unauthorized' });
         }
 
         if (isApi) return dashboardApi(req, res, url);
@@ -137,17 +143,18 @@ function createStatsServer(client, { token = null } = {}) {
  * Start the stats endpoint.
  *
  * @param {import('discord.js').Client} client - Discord client
- * @param {{port: number, host: string, token?: string|null}} options - Listen settings
+ * @param {{port: number, host: string, token?: string|null, previousToken?: string|null, dashboard?: boolean}} options - Listen settings
  * @returns {Promise<import('node:http').Server>}
  */
-function startStatsServer(client, { port, host, token = null }) {
-    const server = createStatsServer(client, { token });
+function startStatsServer(client, { port, host, token = null, previousToken = null, dashboard = true }) {
+    const server = createStatsServer(client, { token, previousToken, dashboard });
     return new Promise((resolve, reject) => {
         server.once('error', reject);
         server.listen(port, host, () => {
             server.off('error', reject);
             server.on('error', err => logger.error('Stats server error.', err));
-            logger.system(`Stats endpoint listening on http://${host}:${server.address().port}/stats${token ? ' (token required)' : ''}`);
+            const api = token && dashboard ? ', dashboard API on /api/' : '';
+            logger.system(`Stats endpoint listening on http://${host}:${server.address().port}/stats${token ? ' (token required)' : ''}${api}`);
             resolve(server);
         });
     });

@@ -28,6 +28,14 @@ function boundedInteger(name, fallback, min, max) {
     return value;
 }
 
+function optionalBoolean(name, fallback) {
+    const raw = process.env[name]?.trim().toLowerCase();
+    if (!raw) return fallback;
+    if (['true', '1', 'yes', 'on'].includes(raw)) return true;
+    if (['false', '0', 'no', 'off'].includes(raw)) return false;
+    throw new Error(`${name} must be true or false`);
+}
+
 function requiredDiscordId(name) {
     const value = requiredEnv(name);
     if (!DISCORD_ID_REGEX.test(value)) throw new Error(`${name} must be a valid Discord ID`);
@@ -68,6 +76,8 @@ if (!/^[A-Za-z0-9_]+$/.test(dbName)) throw new Error('DB_NAME contains unsupport
  * @property {number} STATS_PORT - Port for the public stats endpoint (0 = disabled)
  * @property {string} STATS_HOST - Interface the stats endpoint listens on
  * @property {string|null} STATS_TOKEN - Optional bearer token required by the stats endpoint
+ * @property {string|null} STATS_TOKEN_PREVIOUS - Previous token, accepted during a rotation
+ * @property {boolean} DASHBOARD_API - Serve the website dashboard's API (only when STATS_TOKEN is set)
  * @property {Object} DB - MySQL database configuration
  */
 
@@ -111,6 +121,16 @@ const CONFIG = {
 
     /** If set, the stats endpoint requires "Authorization: Bearer <token>" */
     STATS_TOKEN: process.env.STATS_TOKEN?.trim() || null,
+
+    /** Old token still accepted while a new STATS_TOKEN is being rolled out; remove once the website uses the new one */
+    STATS_TOKEN_PREVIOUS: process.env.STATS_TOKEN_PREVIOUS?.trim() || null,
+
+    /**
+     * Serve the API behind the hosted website dashboard under /api/ (needs STATS_TOKEN).
+     * Self-hosted bots that do not use that dashboard can set it to false; every
+     * feature is also available with slash commands.
+     */
+    DASHBOARD_API: optionalBoolean('DASHBOARD_API', true),
 
     /** MySQL database configuration */
     DB: {

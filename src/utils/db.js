@@ -351,6 +351,31 @@ async function getAudit(guildId, limit = 25) {
 }
 
 /**
+ * Every stored dashboard session revocation.
+ *
+ * @returns {Promise<{user_id: string, revoked_before: number}[]>}
+ */
+async function loadSessionRevocations() {
+    const db = await getPool();
+    const [rows] = await db.query('SELECT user_id, revoked_before FROM session_revocations');
+    return rows;
+}
+
+/**
+ * Refuse a user's dashboard sessions issued before the given time.
+ *
+ * @param {string} userId - Discord user ID
+ * @param {number} revokedBefore - Unix time in seconds
+ */
+async function setSessionRevocation(userId, revokedBefore) {
+    const db = await getPool();
+    await db.query(
+        'INSERT INTO session_revocations (user_id, revoked_before) VALUES (?, ?) ON DUPLICATE KEY UPDATE revoked_before = VALUES(revoked_before)',
+        [userId, revokedBefore]
+    );
+}
+
+/**
  * Exempt a role from trap bans on a server.
  * 
  * @param {string} guildId - Server ID
@@ -431,6 +456,8 @@ module.exports = {
     removeGuildData,
     addAudit,
     getAudit,
+    loadSessionRevocations,
+    setSessionRevocation,
     addExemptRole,
     removeExemptRole,
     purgeOldMessageContent,
