@@ -20,12 +20,15 @@
  *   GET  /api/guilds/:id            settings, health and totals of one server
  *   GET  /api/guilds/:id/bans       ban history of one server (?page=, ?q=)
  *   GET  /api/guilds/:id/export     the newest 2,000 bans of one server, for a CSV download
+ *   GET  /api/guilds/:id/stats      ban statistics of one server for the last 30 days
  *   GET  /api/guilds/:id/audit      recent settings changes made through the dashboard
  *   POST /api/guilds/:id/settings   change settings (see dashboardSettings.js)
  *   POST /api/guilds/:id/unban      lift a Discord ban ({userId}), with an audit entry
  *   GET  /api/admin/overview        every server and the global totals (owner only)
  *   GET  /api/admin/bans            ban history across all servers (owner only)
+ *   GET  /api/admin/stats           ban statistics of all servers for the last 30 days (owner only)
  *   POST /api/admin/purge-user      delete a user's ban records everywhere (owner only)
+ *   POST /api/admin/leave           make the bot leave a server ({guildId}) (owner only)
  *
  * @module utils/dashboardApi
  */
@@ -33,6 +36,7 @@
 const { PermissionFlagsBits } = require('discord.js');
 
 const CONFIG = require('../config');
+const { summarizeBans } = require('./banStats');
 const db = require('./db');
 const guildSettings = require('./guildSettings');
 const { applySettings, listChannelOptions, listRoleOptions } = require('./dashboardSettings');
@@ -52,6 +56,7 @@ const MAX_BODY_BYTES = 4096;
  */
 const EXPORT_LIMIT = 2000;
 const EXPORT_MESSAGE_LENGTH = 500;
+const STATS_DAYS = 30;
 
 /**
  * Requests per minute. A server page makes three requests and a saved change
@@ -197,7 +202,7 @@ function createDashboardApi(client, { limits = {} } = {}) {
         if (sessionRevocations.isRevoked(userId, issuedAt)) return send(403, { error: 'session revoked' });
 
         // An export reads a whole ban history, so it counts against the search limit too.
-        const isSearch = Boolean(url.searchParams.get('q')) || url.pathname.endsWith('/export');
+        const isSearch = Boolean(url.searchParams.get('q')) || /\/(export|stats)$/.test(url.pathname);
         // Every limiter counts the request, so one that is already over does not hide the others.
         const allowed = [userLimiter.hit(userId), !isSearch || searchLimiter.hit(userId), totalLimiter.hit('all')];
         if (allowed.includes(false)) return send(429, { error: 'too many requests' });
@@ -239,6 +244,33 @@ function createDashboardApi(client, { limits = {} } = {}) {
                     const { page, query } = pagingFrom(url);
                     const { total, rows } = await db.searchBans(null, { query, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE });
                     return send(200, { total, page, pageSize: PAGE_SIZE, bans: rows.map(banJson) });
+                }
+
+                if (req.method === 'GET' && parts.length === 3 && parts[2] === 'stats') {
+                    const { rows, truncated } = await db.getBanActivity(null, STATS_DAYS);
+                    const perGuild = new Map();
+                    for (const row of rows) perGuild.set(row.guild_id, (perGuild.get(row.guild_id) ?? 0) + 1);
+                    const busiest = [...perGuild]
+                        .map(([id, count]) => ({ id, name: client.guilds.cache.get(id)?.name ?? null, count }))
+                        .sort((a, b) => b.count - a.count)
+                        .slice(0, 5);
+                    return send(200, { ...summarizeBans(rows, { days: STATS_DAYS, truncated }), servers: busiest });
+                }
+
+                if (req.method === 'POST' && parts.length === 3 && parts[2] === 'leave') {
+                    const body = await readJson(req);
+                    const target = String(body?.guildId ?? '');
+                    if (!SNOWFLAKE.test(target)) return send(422, { ok: false, error: 'Invalid server ID.' });
+                    const guild = client.guilds.cache.get(target);
+                    if (!guild) return send(422, { ok: false, error: 'The bot is not in that server.' });
+                    try {
+                        await guild.leave();
+                    } catch (error) {
+                        logger.error(`Failed to leave guild ${target} from the dashboard.`, error);
+                        return send(422, { ok: false, error: 'Could not leave the server.' });
+                    }
+                    logger.info(`Dashboard: owner ${userId} made the bot leave ${guild.name} (${guild.id}).`);
+                    return send(200, { ok: true });
                 }
 
                 if (req.method === 'POST' && parts.length === 3 && parts[2] === 'purge-user') {
@@ -312,6 +344,11 @@ function createDashboardApi(client, { limits = {} } = {}) {
                             createdAt: new Date(row.created_at).toISOString(),
                         })),
                     });
+                }
+
+                if (parts[3] === 'stats') {
+                    const { rows, truncated } = await db.getBanActivity(guild.id, STATS_DAYS);
+                    return send(200, summarizeBans(rows, { days: STATS_DAYS, truncated }));
                 }
 
                 if (parts[3] === 'export') {

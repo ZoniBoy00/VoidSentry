@@ -180,6 +180,30 @@ async function searchBans(guildId, { query = '', limit = 25, offset = 0 } = {}) 
 }
 
 /**
+ * Timestamps and trap channels of the newest bans from the last N days, for statistics.
+ *
+ * @param {string|null} guildId - Restrict to one server (null = all servers)
+ * @param {number} days - Window size in days
+ * @param {number} limit - Most rows to read
+ * @returns {Promise<{rows: Object[], truncated: boolean}>} `truncated` when there were more than `limit`
+ */
+async function getBanActivity(guildId, days = 30, limit = 50000) {
+    const db = await getPool();
+    const params = [days];
+    let where = 'created_at >= (NOW() - INTERVAL ? DAY)';
+    if (guildId) {
+        where += ' AND guild_id = ?';
+        params.push(guildId);
+    }
+
+    const [rows] = await db.query(
+        `SELECT created_at, guild_id, channel_name FROM bans WHERE ${where} ORDER BY created_at DESC LIMIT ?`,
+        [...params, limit + 1]
+    );
+    return { rows: rows.slice(0, limit), truncated: rows.length > limit };
+}
+
+/**
  * Number of stored bans per server.
  *
  * @returns {Promise<Map<string, number>>} Server ID to ban count
@@ -444,6 +468,7 @@ module.exports = {
     findBansByUserId,
     getBans,
     searchBans,
+    getBanActivity,
     getBanCountsByGuild,
     getBanCount,
     getBanCountSince,

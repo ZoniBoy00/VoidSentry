@@ -34,6 +34,7 @@ const purged = [];
 const saved = [];
 const audits = [];
 const unbanned = [];
+const left = [];
 let unbanError = null;
 db.addAudit = async entry => { audits.push(entry); };
 db.getAudit = async () => [{ id: 1, user_id: '44444444444444444', detail: 'dry-run turned on', created_at: new Date('2026-10-02T08:00:00Z') }];
@@ -62,6 +63,7 @@ function makeGuild(id, name, { canBan = true } = {}) {
     name,
     ownerId: SERVER_OWNER,
     memberCount: 120,
+    leave: async () => { left.push(id); },
     iconURL: () => 'https://cdn.example/icon.png',
     members: {
       unban: async (userId, reason) => {
@@ -420,5 +422,46 @@ test('writing to read-only routes is still refused', async () => {
   await withServer({ token: TOKEN }, async server => {
     assert.equal((await request(server, `/api/guilds/${GUILD}/bans`, { method: 'POST', body: {} })).status, 405);
     assert.equal((await request(server, `/api/guilds/${GUILD}`, { method: 'POST', body: {} })).status, 405);
+  });
+});
+
+test('ban statistics are available to administrators of the server and to the owner', async () => {
+  const now = new Date();
+  db.getBanActivity = async guildId => ({
+    truncated: false,
+    rows: [
+      { created_at: now, guild_id: guildId ?? GUILD, channel_name: 'trap' },
+      { created_at: now, guild_id: guildId ?? GUILD, channel_name: 'trap' },
+      { created_at: now, guild_id: OTHER_GUILD, channel_name: 'other' },
+    ],
+  });
+  await withServer({ token: TOKEN }, async server => {
+    const { status, body } = await request(server, `/api/guilds/${GUILD}/stats`);
+    assert.equal(status, 200);
+    assert.equal(body.last30, 3);
+    assert.equal(body.perDay.length, 30);
+    assert.deepEqual(body.channels[0], { name: 'trap', count: 2 });
+    assert.equal((await request(server, `/api/guilds/${GUILD}/stats`, { user: MEMBER })).status, 404);
+
+    assert.equal((await request(server, '/api/admin/stats', { user: ADMIN })).status, 404);
+    const all = await request(server, '/api/admin/stats', { user: BOT_OWNER });
+    assert.equal(all.status, 200);
+    assert.deepEqual(all.body.servers[0], { id: GUILD, name: 'Main server', count: 2 });
+  });
+});
+
+test('only the owner can make the bot leave a server', async () => {
+  left.length = 0;
+  await withServer({ token: TOKEN }, async server => {
+    const refused = await request(server, '/api/admin/leave', { user: ADMIN, method: 'POST', body: { guildId: OTHER_GUILD } });
+    assert.equal(refused.status, 404);
+    assert.deepEqual(left, []);
+
+    assert.equal((await request(server, '/api/admin/leave', { user: BOT_OWNER, method: 'POST', body: { guildId: 'nope' } })).status, 422);
+    assert.equal((await request(server, '/api/admin/leave', { user: BOT_OWNER, method: 'POST', body: { guildId: '99999999999999990' } })).status, 422);
+
+    const ok = await request(server, '/api/admin/leave', { user: BOT_OWNER, method: 'POST', body: { guildId: OTHER_GUILD } });
+    assert.equal(ok.status, 200);
+    assert.deepEqual(left, [OTHER_GUILD]);
   });
 });
