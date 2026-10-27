@@ -39,7 +39,7 @@ A high-performance Discord security bot designed to catch and remove self-bots a
 - **Unban from the log** — Every ban log has an Unban button for administrators.
 - **Change log** — Every settings change and unban (from a command, the log button or the dashboard) is recorded with who made it, in the `audit_log` table.
 - **Owner alerts** — When the bot cannot ban on a server (missing permission, role too low), the server owner gets at most one direct message a day about it.
-- **Optional web dashboard** — The hosted bot at [voidsentry.vercel.app](https://voidsentry.vercel.app) has a dashboard for settings, ban history, unbans and CSV export. Its website is not open source; the API it uses is in this repository and switched off unless you configure it. Self-hosted bots are fully usable with slash commands alone (see [Running without the dashboard](#running-without-the-dashboard)).
+- **Optional web dashboard** — The hosted bot at [voidsentry.vercel.app](https://voidsentry.vercel.app) has a dashboard for settings, ban history, statistics, unbans and CSV export. Its website is not open source; the API it uses is in this repository and switched off unless you configure it. Self-hosted bots are fully usable with slash commands alone (see [Running without the dashboard](#running-without-the-dashboard)).
 - **Live Status** — The bot's "Watching" status rotates between your `STATUS_TEXT`, the number of servers and the total number of users banned.
 - **Structured Logging** — Pino-based logger with categories (system, security, ban, detection, command)
 - **Statistics Tracking** — In-memory tracking of bans, detections, and DM success rate
@@ -92,6 +92,7 @@ VoidSentry/
 │       ├── statsServer.js         # Optional stats endpoint (+ dashboard API)
 │       ├── dashboardApi.js        # Optional API for the hosted dashboard
 │       ├── dashboardSettings.js   # Settings changes made through the dashboard
+│       ├── banStats.js            # Ban statistics (per day, hour, weekday, channel) for the dashboard
 │       ├── rateLimit.js           # Dashboard API rate limits
 │       ├── sessionRevocations.js  # "Sign out everywhere" for the dashboard
 │       ├── permissions.js         # Permission checker
@@ -139,7 +140,7 @@ Copy `.env.example` to `.env` and fill in your credentials:
 | `BAN_REASON` | Default ban reason. Servers can override it. |
 | `STATS_PORT` | Optional. Port of a read-only JSON endpoint (`GET /stats`) with aggregate numbers (servers, members, total bans, bans in the last 7 days) for the website. `0` or empty = disabled. |
 | `STATS_HOST` | Interface for the stats endpoint (default `127.0.0.1`). Keep it on localhost and expose it through a tunnel or reverse proxy. |
-| `STATS_TOKEN` | Optional bearer token the stats endpoint requires. |
+| `STATS_TOKEN` | Optional bearer token the stats endpoint requires. Use a random value of at least 32 characters (for example `openssl rand -hex 32`); the bot logs a warning at start-up if it is shorter. |
 | `STATS_TOKEN_PREVIOUS` | Only during a token rotation: the old token, still accepted (see [Rotating STATS_TOKEN](#rotating-stats_token)). |
 | `DASHBOARD_API` | `true` (default) serves the dashboard API under `/api/` when `STATS_TOKEN` is set. Set `false` to serve only `/stats` (see [Running without the dashboard](#running-without-the-dashboard)). |
 | `BACKUP_DIR`, `BACKUP_KEEP`, `BACKUP_KEY`, `BACKUP_COPY_DIR` | Used by `npm run backup` only (see [Backups and migrations](#backups-and-migrations)). |
@@ -332,7 +333,7 @@ The decrypt step refuses a wrong key or a changed file and leaves no partial out
 
 ## Dashboard API
 
-When `STATS_PORT` and `STATS_TOKEN` are set (and `DASHBOARD_API` is not `false`), the stats server also serves the API behind the website dashboard under `/api/` (see `src/utils/dashboardApi.js` for the routes, including settings, unban and CSV export). It always requires the bearer token and acts for the Discord user named in `X-Discord-User`; the bot checks that user rights in each server itself. Anyone who holds `STATS_TOKEN` can act as any user, so keep it secret and expose the port only through a tunnel or reverse proxy.
+When `STATS_PORT` and `STATS_TOKEN` are set (and `DASHBOARD_API` is not `false`), the stats server also serves the API behind the website dashboard under `/api/` (see `src/utils/dashboardApi.js` for the routes, including settings, unban, CSV export and statistics, and the owner-only routes for server trends, leaving a server and deleting a user's data). It always requires the bearer token and acts for the Discord user named in `X-Discord-User`; the bot checks that user rights in each server itself. Anyone who holds `STATS_TOKEN` can act as any user, so keep it secret and expose the port only through a tunnel or reverse proxy.
 
 - **Sign out everywhere.** The website sends the issue time of the session in `X-Session-Issued`. `POST /api/me/revoke` stores the current time for that user (table `session_revocations`), and every older session of that user then gets `403`, owner routes included.
 - **Rate limits.** Per user 120 requests and 20 searches a minute, and 1,200 requests a minute in total; over the limit the API answers `429`. All requests arrive from the website's servers, so limits are per Discord user, not per IP. Sign-in on the website never reaches the bot; limit it with the Vercel Firewall if needed.
