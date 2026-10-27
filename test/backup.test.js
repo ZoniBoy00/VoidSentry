@@ -16,6 +16,12 @@ test('never deletes files that are not backups, and always keeps at least one', 
   assert.equal(backupsToDelete(names, 0).includes('notes.txt'), false);
 });
 
+test('plain and encrypted backups are pruned together', () => {
+  const mixed = ['voidsentry-20261001-000000.sql.gz', 'voidsentry-20261002-000000.sql.gz.enc', 'voidsentry-20261003-000000.sql.gz.enc'];
+  assert.deepEqual(backupsToDelete(mixed, 2), ['voidsentry-20261001-000000.sql.gz']);
+  assert.deepEqual(backupsToDelete(mixed, 1), ['voidsentry-20261001-000000.sql.gz', 'voidsentry-20261002-000000.sql.gz.enc']);
+});
+
 test('file name timestamps sort in time order', () => {
   assert.equal(stamp(new Date('2026-10-27T03:15:00Z')), '20261027-031500');
 });
