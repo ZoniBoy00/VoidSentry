@@ -16,7 +16,7 @@ Object.assign(process.env, {
 });
 
 const db = require('../src/utils/db');
-const { createStatsServer } = require('../src/utils/statsServer');
+const { createStatsServer, isWeakToken } = require('../src/utils/statsServer');
 
 let dbCalls = 0;
 db.getBanCount = async () => { dbCalls += 1; return 42; };
@@ -110,4 +110,11 @@ test('answers 503 when the database is unavailable', async () => {
     db.getBanCount = original;
     server.close();
   }
+});
+
+test('a token shorter than 32 characters is reported as weak', () => {
+  assert.equal(isWeakToken('short-token'), true);
+  assert.equal(isWeakToken('a'.repeat(31)), true);
+  assert.equal(isWeakToken('a'.repeat(32)), false);
+  assert.equal(isWeakToken(null), false);
 });

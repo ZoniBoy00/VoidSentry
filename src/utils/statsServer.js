@@ -35,6 +35,19 @@ function tokenMatches(presented, expected) {
     return crypto.timingSafeEqual(a, b);
 }
 
+/** Shortest token that is hard to guess; the token is the only thing protecting the dashboard API. */
+const MIN_TOKEN_LENGTH = 32;
+
+/**
+ * Whether a configured token is too short to be safe.
+ *
+ * @param {string|null|undefined} token - Configured token
+ * @returns {boolean}
+ */
+function isWeakToken(token) {
+    return Boolean(token) && token.length < MIN_TOKEN_LENGTH;
+}
+
 /**
  * Build the stats payload.
  *
@@ -147,6 +160,11 @@ function createStatsServer(client, { token = null, previousToken = null, dashboa
  * @returns {Promise<import('node:http').Server>}
  */
 function startStatsServer(client, { port, host, token = null, previousToken = null, dashboard = true }) {
+    for (const [name, value] of [['STATS_TOKEN', token], ['STATS_TOKEN_PREVIOUS', previousToken]]) {
+        if (isWeakToken(value)) {
+            logger.warn(`${name} is shorter than ${MIN_TOKEN_LENGTH} characters. Anyone who guesses it can act as any dashboard user, including the owner. Use a random value, for example: openssl rand -hex 32`);
+        }
+    }
     const server = createStatsServer(client, { token, previousToken, dashboard });
     return new Promise((resolve, reject) => {
         server.once('error', reject);
@@ -160,4 +178,4 @@ function startStatsServer(client, { port, host, token = null, previousToken = nu
     });
 }
 
-module.exports = { startStatsServer, createStatsServer };
+module.exports = { startStatsServer, createStatsServer, isWeakToken };
