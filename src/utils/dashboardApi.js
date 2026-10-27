@@ -46,6 +46,7 @@ const sessionRevocations = require('./sessionRevocations');
 
 const SNOWFLAKE = /^\d{17,20}$/;
 const MAX_IDS = 100;
+const LOOKUP_BATCH = 10;
 const PAGE_SIZE = 25;
 const MAX_QUERY_LENGTH = 100;
 const MAX_BODY_BYTES = 4096;
@@ -66,6 +67,32 @@ const STATS_DAYS = 30;
 const DEFAULT_LIMITS = { perUser: 120, searchesPerUser: 20, total: 1200, windowMs: 60 * 1000 };
 
 /**
+ * Lookups in flight, by server and user. Requests that arrive while one is
+ * running share its answer; nothing is kept once it finishes, so a role that
+ * was just removed is never served from an earlier answer.
+ */
+const pendingLookups = new Map();
+
+/**
+ * Whether the user has Administrator in the server right now. Asks Discord
+ * every time: guild.members.fetch(id) alone returns a cached member without a
+ * request, which would keep access alive after the role or membership is gone.
+ * Any failure counts as "no".
+ */
+function isAdministrator(guild, userId) {
+    const key = `${guild.id}:${userId}`;
+    let lookup = pendingLookups.get(key);
+    if (!lookup) {
+        lookup = guild.members.fetch({ user: userId, force: true, cache: false })
+            .then(member => Boolean(member?.permissions?.has(PermissionFlagsBits.Administrator)))
+            .catch(() => false)
+            .finally(() => pendingLookups.delete(key));
+        pendingLookups.set(key, lookup);
+    }
+    return lookup;
+}
+
+/**
  * The server if the user may manage it through the dashboard, otherwise null.
  *
  * @param {import('discord.js').Client} client - Discord client
@@ -77,9 +104,7 @@ async function manageableGuild(client, guildId, userId) {
     const guild = client.guilds.cache.get(guildId);
     if (!guild) return null;
     if (guild.ownerId === userId || userId === CONFIG.OWNER_ID) return guild;
-
-    const member = await guild.members.fetch(userId).catch(() => null);
-    return member?.permissions?.has(PermissionFlagsBits.Administrator) ? guild : null;
+    return (await isAdministrator(guild, userId)) ? guild : null;
 }
 
 /** `{id, name}` for a channel or role, falling back to the ID if it no longer exists. */
@@ -201,14 +226,16 @@ function createDashboardApi(client, { limits = {} } = {}) {
         const issuedAt = Number.parseInt(String(req.headers['x-session-issued'] || '0'), 10) || 0;
         if (sessionRevocations.isRevoked(userId, issuedAt)) return send(403, { error: 'session revoked' });
 
+        // Routing and rate limiting read the same parsed path, so /export, /export/ and /export// are one route.
+        const parts = url.pathname.split('/').filter(Boolean); // ['api', 'guilds', id?, 'bans'?]
+
         // An export reads a whole ban history, so it counts against the search limit too.
-        const isSearch = Boolean(url.searchParams.get('q')) || /\/(export|stats)$/.test(url.pathname);
+        const isSearch = Boolean(url.searchParams.get('q')) || ['export', 'stats'].includes(parts[parts.length - 1]);
         // Every limiter counts the request, so one that is already over does not hide the others.
         const allowed = [userLimiter.hit(userId), !isSearch || searchLimiter.hit(userId), totalLimiter.hit('all')];
         if (allowed.includes(false)) return send(429, { error: 'too many requests' });
 
         try {
-            const parts = url.pathname.split('/').filter(Boolean); // ['api', 'guilds', id?, 'bans'?]
             const isBotOwner = userId === CONFIG.OWNER_ID;
 
             if (req.method === 'POST' && parts.length === 3 && parts[1] === 'me' && parts[2] === 'revoke') {
@@ -292,7 +319,11 @@ function createDashboardApi(client, { limits = {} } = {}) {
 
             if (parts.length === 2 && parts[1] === 'guilds') {
                 const ids = [...new Set((url.searchParams.get('ids') || '').split(',').filter(id => SNOWFLAKE.test(id)))].slice(0, MAX_IDS);
-                const checked = await Promise.all(ids.map(id => manageableGuild(client, id, userId)));
+                // Each check asks Discord, so they run a few at a time rather than all at once.
+                const checked = [];
+                for (let i = 0; i < ids.length; i += LOOKUP_BATCH) {
+                    checked.push(...await Promise.all(ids.slice(i, i + LOOKUP_BATCH).map(id => manageableGuild(client, id, userId))));
+                }
                 return send(200, {
                     guilds: checked.filter(Boolean).map(guild => ({
                         id: guild.id,

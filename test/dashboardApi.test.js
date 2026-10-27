@@ -71,7 +71,8 @@ function makeGuild(id, name, { canBan = true } = {}) {
         unbanned.push({ guildId: id, userId, reason });
       },
       me: { permissions: { has: () => canBan } },
-      fetch: async userId => {
+      fetch: async options => {
+        const userId = typeof options === 'string' ? options : options?.user;
         const member = members.get(userId);
         if (!member) throw new Error('Unknown Member');
         return member;
@@ -464,4 +465,57 @@ test('only the owner can make the bot leave a server', async () => {
     assert.equal(ok.status, 200);
     assert.deepEqual(left, [OTHER_GUILD]);
   });
+});
+
+test('route classification ignores trailing slashes, so exports share one rate limit bucket', async () => {
+  await withServer({ token: TOKEN, limits: { searchesPerUser: 1, perUser: 100, total: 100 } }, async server => {
+    assert.equal((await request(server, `/api/guilds/${GUILD}/export`)).status, 200);
+    for (const suffix of ['/export', '/export/', '/export///']) {
+      assert.equal((await request(server, `/api/guilds/${GUILD}${suffix}`)).status, 429, suffix);
+    }
+  });
+});
+
+test('an administrator whose membership is gone is refused even if discord.js still has them cached', async () => {
+  const { GuildMemberManager } = require('discord.js');
+  const guild = guilds.get(GUILD);
+  const original = guild.members;
+  let restCalls = 0;
+  let stillAdmin = true;
+  const manager = {
+    ...original,
+    cache: new Map([[ADMIN, { partial: false, permissions: { has: () => true } }]]),
+    guild: { id: GUILD },
+    client: {
+      users: { resolveId: id => (typeof id === 'string' ? id : id?.id) },
+      rest: {
+        get: async () => {
+          restCalls++;
+          if (!stillAdmin) throw Object.assign(new Error('Unknown Member'), { code: 10007 });
+          return {};
+        },
+      },
+    },
+    _add: () => ({ permissions: { has: () => stillAdmin } }),
+  };
+  manager._fetchSingle = GuildMemberManager.prototype._fetchSingle.bind(manager);
+  manager.fetch = GuildMemberManager.prototype.fetch.bind(manager);
+  guild.members = manager;
+  try {
+    await withServer({ token: TOKEN }, async server => {
+      assert.equal((await request(server, `/api/guilds/${GUILD}/bans`)).status, 200);
+      assert.equal(restCalls, 1, 'the check asks Discord instead of trusting the cache');
+
+      stillAdmin = false;
+      const unbannedBefore = unbanned.length;
+      assert.equal((await request(server, `/api/guilds/${GUILD}/bans`)).status, 404);
+      assert.equal((await request(server, `/api/guilds/${GUILD}`, { method: 'GET' })).status, 404);
+      assert.equal((await request(server, `/api/guilds/${GUILD}/settings`, { method: 'POST', body: { dryRun: true } })).status, 404);
+      assert.equal((await request(server, `/api/guilds/${GUILD}/unban`, { method: 'POST', body: { userId: '77777777777777777' } })).status, 404);
+      assert.equal(unbanned.length, unbannedBefore);
+      assert.equal(manager.cache.has(ADMIN), true, 'the lookup did not touch the cache');
+    });
+  } finally {
+    guild.members = original;
+  }
 });
