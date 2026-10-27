@@ -1,4 +1,4 @@
-# 🔨 VoidSentry v2.0
+# 🔨 VoidSentry v2.1
 
 ![VoidSentry Banner](./assets/VoidSentryBanner.gif)
 
@@ -36,6 +36,10 @@ A high-performance Discord security bot designed to catch and remove self-bots a
     - `/bans search <user_id>` — Search bans by user ID
     - `/bans stats` — Show database statistics
     - Results are limited to the current server (the bot owner can add `global:true`)
+- **Unban from the log** — Every ban log has an Unban button for administrators.
+- **Change log** — Every settings change and unban (from a command, the log button or the dashboard) is recorded with who made it, in the `audit_log` table.
+- **Owner alerts** — When the bot cannot ban on a server (missing permission, role too low), the server owner gets at most one direct message a day about it.
+- **Optional web dashboard** — The hosted bot at [voidsentry.vercel.app](https://voidsentry.vercel.app) has a dashboard for settings, ban history, unbans and CSV export. Its website is not open source; the API it uses is in this repository and switched off unless you configure it. Self-hosted bots are fully usable with slash commands alone (see [Running without the dashboard](#running-without-the-dashboard)).
 - **Live Status** — The bot's "Watching" status rotates between your `STATUS_TEXT`, the number of servers and the total number of users banned.
 - **Structured Logging** — Pino-based logger with categories (system, security, ban, detection, command)
 - **Statistics Tracking** — In-memory tracking of bans, detections, and DM success rate
@@ -74,27 +78,42 @@ VoidSentry/
 │   │   ├── channelDelete.js       # Unregisters deleted trap channels
 │   │   └── messageCreate.js       # Core trap detection & ban logic
 │   └── utils/
-│       ├── db.js                   # MySQL database connection
+│       ├── db.js                   # MySQL queries
+│       ├── migrations.js          # Versioned schema migrations
 │       ├── deploy.js              # Slash command deployment
 │       ├── guildSettings.js       # Per-server settings & trap channels (cached)
+│       ├── audit.js               # Change log entries for commands and buttons
+│       ├── unbanButton.js         # Unban button on ban logs
+│       ├── ownerAlerts.js         # Daily DM to a server owner when bans fail
+│       ├── messageEvidence.js     # Summary of the message that triggered a ban
 │       ├── helpers.js             # Utility functions
 │       ├── logger.js              # Pino structured logger
 │       ├── presence.js            # Rotating bot status
-│       ├── statsServer.js         # Optional read-only stats endpoint
+│       ├── statsServer.js         # Optional stats endpoint (+ dashboard API)
+│       ├── dashboardApi.js        # Optional API for the hosted dashboard
+│       ├── dashboardSettings.js   # Settings changes made through the dashboard
+│       ├── rateLimit.js           # Dashboard API rate limits
+│       ├── sessionRevocations.js  # "Sign out everywhere" for the dashboard
 │       ├── permissions.js         # Permission checker
 │       ├── stats.js               # In-memory statistics
 │       └── constants.js           # Colors, paths, branding
+├── scripts/
+│   ├── backup.js                  # npm run backup
+│   ├── backupCrypto.js            # Backup encryption
+│   └── decrypt-backup.js          # npm run backup:decrypt
+├── test/                          # node --test (npm test)
 ├── .env                           # Your secrets (not committed)
 ├── .env.example                   # Example config template
-├── .gitignore
+├── Dockerfile
 ├── index.js                       # Entry point
 ├── package.json
+├── SECURITY.md                    # How to report vulnerabilities
 └── README.md
 ```
 
 ## 🛠️ Installation
 
-1. **Requirement**: [Node.js](https://nodejs.org/) v18.0 or higher.
+1. **Requirement**: [Node.js](https://nodejs.org/) v20 or higher (CI and the Docker image use Node 20).
 2. **Database**: Set up a MySQL database (see configuration below).
 3. **Download**: Clone or download this repository.
 4. **Install Dependencies**:
@@ -121,6 +140,9 @@ Copy `.env.example` to `.env` and fill in your credentials:
 | `STATS_PORT` | Optional. Port of a read-only JSON endpoint (`GET /stats`) with aggregate numbers (servers, members, total bans, bans in the last 7 days) for the website. `0` or empty = disabled. |
 | `STATS_HOST` | Interface for the stats endpoint (default `127.0.0.1`). Keep it on localhost and expose it through a tunnel or reverse proxy. |
 | `STATS_TOKEN` | Optional bearer token the stats endpoint requires. |
+| `STATS_TOKEN_PREVIOUS` | Only during a token rotation: the old token, still accepted (see [Rotating STATS_TOKEN](#rotating-stats_token)). |
+| `DASHBOARD_API` | `true` (default) serves the dashboard API under `/api/` when `STATS_TOKEN` is set. Set `false` to serve only `/stats` (see [Running without the dashboard](#running-without-the-dashboard)). |
+| `BACKUP_DIR`, `BACKUP_KEEP`, `BACKUP_KEY`, `BACKUP_COPY_DIR` | Used by `npm run backup` only (see [Backups and migrations](#backups-and-migrations)). |
 | `MESSAGE_RETENTION_DAYS` | Days to keep captured message content in the ban history (default: 90, `0` = keep forever). |
 | `NODE_ENV` | `development` for guild commands, `production` for global. |
 
@@ -133,7 +155,7 @@ Copy `.env.example` to `.env` and fill in your credentials:
 | `DB_PASSWORD` | MySQL password | required |
 | `DB_NAME` | Existing database name | required |
 
-**Note:** The `bans`, `guild_settings`, `trap_channels` and `exempt_roles` tables are created automatically. The database itself must exist
+**Note:** The tables are created and updated automatically by migrations at startup. The database itself must exist
 and the configured user only needs access to that database.
 
 ## 🕹️ How to Use
@@ -220,7 +242,7 @@ When a user is banned, the log embed includes:
 ## 📝 Important Notes
 
 - **Message Content Intent**: Must be enabled in Discord Developer Portal → Bot → Privileged Intents.
-- **Database**: MySQL is required for ban history storage. Database auto-creates on first run.
+- **Database**: MySQL is required. The database must exist; its tables are created on first run.
 - **No Appeals**: The bot uses a "zero-tolerance" policy. Anyone typing in the trap channel is banned immediately.
 - **Message Purge**: The banned user's recent messages are deleted (24 hours by default).
 - **Docker**: A `Dockerfile` is included. The bot exits on uncaught exceptions, so run it with a restart policy (`docker run --restart unless-stopped --env-file .env voidsentry`).
@@ -272,9 +294,19 @@ CREATE TABLE exempt_roles (
 );
 ```
 
----
+Also created by migrations: `audit_log` (who changed which setting or lifted which ban, and when), `session_revocations` (dashboard "sign out everywhere") and `schema_migrations` (which migrations have run). `src/utils/migrations.js` has the exact definitions.
 
-*Created for secure Discord community management.*
+## Running without the dashboard
+
+The web dashboard belongs to the hosted bot and its website is not open source. A self-hosted bot does not need it: every setting and action is available as a slash command, ban logs carry an Unban button, and the change log is still written to the database.
+
+The dashboard API is never served unless you set both `STATS_PORT` and `STATS_TOKEN`. To run the bot on its own:
+
+- Leave `STATS_PORT` empty (or `0`). No HTTP port is opened at all.
+- Or, to publish only the aggregate `/stats` numbers (for your own status page or monitoring), set `STATS_PORT` and optionally `STATS_TOKEN`, and set `DASHBOARD_API=false`. Then `/api/*` answers `404` even with a valid token.
+
+The dashboard tables (`audit_log`, `session_revocations`) are still created; they stay small and unused apart from the change log.
+
 ## Backups and migrations
 
 The schema is managed by versioned migrations (`src/utils/migrations.js`) that run automatically at startup and are recorded in the `schema_migrations` table. Never edit a shipped migration; add a new one.
@@ -287,6 +319,41 @@ The schema is managed by versioned migrations (`src/utils/migrations.js`) that r
 
 To restore: `gunzip -c backups/voidsentry-YYYYMMDD-HHMMSS.sql.gz | mysql -h HOST -u USER -p DATABASE`.
 
+**Encryption and an off-machine copy.** Set `BACKUP_KEY` to a long random passphrase and backups are written as `.sql.gz.enc` (AES-256-GCM, key derived with scrypt). Without it they stay unencrypted and the script prints a warning. Keep the key in a password manager, not next to the backups: without it an encrypted backup cannot be restored. Set `BACKUP_COPY_DIR` to a folder that is synced to another machine or cloud storage to keep a second copy; it is pruned to `BACKUP_KEEP` files as well. The copy is only made when `BACKUP_KEY` is set, so an unencrypted dump never leaves the machine; otherwise the script skips it and exits with code 1.
+
+To restore an encrypted backup, decrypt it first, then restore as above:
+
+```
+npm run backup:decrypt -- backups/voidsentry-YYYYMMDD-HHMMSS.sql.gz.enc
+gunzip -c backups/voidsentry-YYYYMMDD-HHMMSS.sql.gz | mysql -h HOST -u USER -p DATABASE
+```
+
+The decrypt step refuses a wrong key or a changed file and leaves no partial output. Do one test restore after turning encryption on.
+
 ## Dashboard API
 
-When `STATS_PORT` and `STATS_TOKEN` are set, the stats server also serves the API behind the website dashboard under `/api/` (see `src/utils/dashboardApi.js`). It always requires the bearer token and acts for the Discord user named in `X-Discord-User`; the bot checks that user rights in each server itself. Anyone who holds `STATS_TOKEN` can act as any user, so keep it secret and expose the port only through a tunnel or reverse proxy.
+When `STATS_PORT` and `STATS_TOKEN` are set (and `DASHBOARD_API` is not `false`), the stats server also serves the API behind the website dashboard under `/api/` (see `src/utils/dashboardApi.js` for the routes, including settings, unban and CSV export). It always requires the bearer token and acts for the Discord user named in `X-Discord-User`; the bot checks that user rights in each server itself. Anyone who holds `STATS_TOKEN` can act as any user, so keep it secret and expose the port only through a tunnel or reverse proxy.
+
+- **Sign out everywhere.** The website sends the issue time of the session in `X-Session-Issued`. `POST /api/me/revoke` stores the current time for that user (table `session_revocations`), and every older session of that user then gets `403`, owner routes included.
+- **Rate limits.** Per user 120 requests and 20 searches a minute, and 1,200 requests a minute in total; over the limit the API answers `429`. All requests arrive from the website's servers, so limits are per Discord user, not per IP. Sign-in on the website never reaches the bot; limit it with the Vercel Firewall if needed.
+
+### Rotating STATS_TOKEN
+
+Rotate it at once if it may have leaked (a commit, a screenshot, a shared log), and otherwise now and then. The bot accepts two tokens during the switch, so the dashboard keeps working:
+
+1. Generate a new token, for example `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`.
+2. In the bot's `.env`: move the current value to `STATS_TOKEN_PREVIOUS` and put the new one in `STATS_TOKEN`. Restart the bot.
+3. In Vercel, set `BOT_STATS_TOKEN` to the new token and redeploy the website.
+4. Check that the dashboard and `/status` work, then empty `STATS_TOKEN_PREVIOUS` and restart the bot again. The old token is now refused.
+
+If the token leaked, also use **Sign out everywhere** on the dashboard and check the audit log of each server for changes you did not make.
+
+A separate owner-only token would add little: the website needs both to work, so both would sit in the same Vercel environment and leak together. The owner routes are instead protected by the same token, the owner's Discord sign-in and session revocation.
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for how to report a vulnerability.
+
+---
+
+*Created for secure Discord community management.*
