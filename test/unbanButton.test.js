@@ -14,6 +14,10 @@ Object.assign(process.env, {
   NODE_ENV: 'production',
 });
 
+const db = require('../src/utils/db');
+const audits = [];
+db.addAudit = async entry => { audits.push(entry); };
+
 const { createUnbanRow, handleUnbanButton } = require('../src/utils/unbanButton');
 
 const TARGET = '98765432109876543';
@@ -54,6 +58,7 @@ test('an administrator can unban from the button, which then shows who did it', 
   const [button] = calls.update[0].components[0].toJSON().components;
   assert.equal(button.disabled, true);
   assert.match(button.label, /Unbanned by mod/);
+  assert.deepEqual(audits.at(-1), { guildId: '12345678901234567', userId: '11111111111111111', detail: `user ${TARGET} unbanned (with the log button)` });
 });
 
 test('members without Administrator are refused and nothing is unbanned', async () => {

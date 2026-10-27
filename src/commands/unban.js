@@ -9,6 +9,7 @@
 
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 
+const { recordAudit } = require('../utils/audit');
 const logger = require('../utils/logger');
 
 /** Regex to validate Discord snowflake IDs (17-19 digits) */
@@ -45,6 +46,7 @@ module.exports = {
         try {
             await interaction.guild.members.unban(userId, `Unbanned by ${interaction.user.tag} (${interaction.user.id}) via VoidSentry`);
             logger.info(`${interaction.user.tag} unbanned ${userId} in ${interaction.guild.name}.`);
+            recordAudit(interaction.guild.id, interaction.user.id, `user ${userId} unbanned (with /unban)`);
             await interaction.editReply({ content: `✅ User \`${userId}\` has been unbanned.` });
         } catch (error) {
             // 10026 = Unknown Ban

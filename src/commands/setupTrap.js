@@ -11,6 +11,7 @@
 const { SlashCommandBuilder, MessageFlags, PermissionFlagsBits } = require('discord.js');
 
 const { createWarningEmbed } = require('../embeds/warningEmbed');
+const { recordAudit } = require('../utils/audit');
 const { createLogoAttachment } = require('../utils/helpers');
 const guildSettings = require('../utils/guildSettings');
 const logger = require('../utils/logger');
@@ -59,6 +60,7 @@ module.exports = {
             logger.error(`Failed to register trap channel #${channel.name} (${channel.id}).`, error);
             return interaction.editReply({ content: '❌ Failed to save the trap channel. Please try again.' });
         }
+        recordAudit(interaction.guild.id, interaction.user.id, `trap channel added: #${channel.name} (${channel.id}) (with /setup-trap)`);
 
         // Clear up to 50 recent messages; Discord does not bulk-delete messages older than 14 days.
         const fetched = await channel.messages.fetch({ limit: 50 }).catch(() => null);

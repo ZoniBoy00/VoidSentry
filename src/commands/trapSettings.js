@@ -11,6 +11,7 @@ const { SlashCommandBuilder, EmbedBuilder, MessageFlags, ChannelType } = require
 
 const { COLORS, LOGO_URL, BRAND_NAME } = require('../utils/constants');
 const { createLogoAttachment } = require('../utils/helpers');
+const { recordAudit } = require('../utils/audit');
 const guildSettings = require('../utils/guildSettings');
 const logger = require('../utils/logger');
 
@@ -78,6 +79,8 @@ module.exports = {
             if (subcommand === 'view') return await this.view(interaction);
 
             let message;
+            // Same wording as the dashboard's audit entries (dashboardSettings.js).
+            let detail;
             if (subcommand === 'remove-trap') {
                 const channel = interaction.options.getChannel('channel') || interaction.channel;
                 if (!guildSettings.listTrapChannels(guildId).includes(channel.id)) {
@@ -85,32 +88,40 @@ module.exports = {
                 }
                 await guildSettings.removeTrapChannel(channel.id);
                 message = `✅ <#${channel.id}> is no longer a trap channel.`;
+                detail = `trap channel removed: #${channel.name} (${channel.id})`;
             } else if (subcommand === 'log-channel') {
                 const channel = interaction.options.getChannel('channel');
                 await guildSettings.setLogChannel(guildId, channel?.id ?? null);
                 message = channel ? `✅ Ban logs will be sent to <#${channel.id}>.` : '✅ Log channel reset to the default.';
+                detail = channel ? `log channel set to #${channel.name} (${channel.id})` : 'log channel reset to the default';
             } else if (subcommand === 'reason') {
                 const text = interaction.options.getString('text')?.trim() || null;
                 await guildSettings.setBanReason(guildId, text);
                 message = text ? '✅ Ban reason updated.' : '✅ Ban reason reset to the default.';
+                detail = text ? 'ban reason changed' : 'ban reason reset to the default';
             } else if (subcommand === 'dry-run') {
                 const enabled = interaction.options.getBoolean('enabled');
                 await guildSettings.setDryRun(guildId, enabled);
                 message = enabled ? '🧪 Dry-run enabled: violations are reported but nobody is banned.' : '✅ Dry-run disabled: violations now result in bans.';
+                detail = `dry-run ${enabled ? 'turned on' : 'turned off'}`;
             } else if (subcommand === 'exempt-add') {
                 const role = interaction.options.getRole('role');
                 await guildSettings.addExemptRole(guildId, role.id);
                 message = `✅ Members with <@&${role.id}> will no longer be banned for writing in a trap channel.`;
+                detail = `exempt role added: ${role.name} (${role.id})`;
             } else if (subcommand === 'exempt-remove') {
                 const role = interaction.options.getRole('role');
                 await guildSettings.removeExemptRole(guildId, role.id);
                 message = `✅ <@&${role.id}> is no longer exempt.`;
+                detail = `exempt role removed: ${role.name} (${role.id})`;
             } else if (subcommand === 'purge') {
                 const seconds = interaction.options.getInteger('seconds');
                 await guildSettings.setDeleteMessageSeconds(guildId, seconds);
                 message = seconds === null ? '✅ Message purge reset to the default.' : `✅ Messages from the last ${seconds}s will be deleted on ban.`;
+                detail = seconds === null ? 'message deletion reset to the default' : `message deletion on ban set to ${seconds} seconds`;
             }
 
+            if (detail) recordAudit(guildId, interaction.user.id, `${detail} (with /trap-settings)`);
             await interaction.reply({ content: message, flags: [MessageFlags.Ephemeral], allowedMentions: { parse: [] } });
         } catch (error) {
             logger.error(`/trap-settings ${subcommand} failed in guild ${guildId}.`, error);

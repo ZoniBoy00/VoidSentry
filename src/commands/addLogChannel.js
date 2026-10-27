@@ -9,6 +9,7 @@
 
 const { SlashCommandBuilder, MessageFlags, ChannelType, PermissionFlagsBits } = require('discord.js');
 
+const { recordAudit } = require('../utils/audit');
 const guildSettings = require('../utils/guildSettings');
 const logger = require('../utils/logger');
 
@@ -66,6 +67,7 @@ module.exports = {
             logger.error(`Failed to save log channel ${channel.id} for guild ${interaction.guild.id}.`, error);
             return interaction.reply({ content: '❌ Failed to save the log channel. Please try again.', flags: [MessageFlags.Ephemeral] });
         }
+        recordAudit(interaction.guild.id, interaction.user.id, `log channel set to #${channel.name} (${channel.id}) (with /add-logchannel)`);
 
         await channel.send({
             content: '✅ VoidSentry will post ban logs in this channel.',

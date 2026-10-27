@@ -9,6 +9,7 @@
 
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 
+const { recordAudit } = require('./audit');
 const logger = require('./logger');
 const { hasAdminPermission } = require('./permissions');
 
@@ -64,6 +65,7 @@ async function handleUnbanButton(interaction) {
     try {
         await interaction.guild.members.unban(userId, `Unbanned by ${interaction.user.tag} (${interaction.user.id}) via VoidSentry`);
         logger.info(`${interaction.user.tag} unbanned ${userId} in ${interaction.guild.name} from the log button.`);
+        recordAudit(interaction.guild.id, interaction.user.id, `user ${userId} unbanned (with the log button)`);
     } catch (error) {
         // 10026 = Unknown Ban: someone already lifted it, so just show the final state.
         if (error?.code !== 10026) {

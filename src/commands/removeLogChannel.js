@@ -9,6 +9,7 @@
 
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 
+const { recordAudit } = require('../utils/audit');
 const guildSettings = require('../utils/guildSettings');
 const logger = require('../utils/logger');
 
@@ -35,6 +36,7 @@ module.exports = {
             logger.error(`Failed to clear log channel for guild ${interaction.guild.id}.`, error);
             return interaction.reply({ content: '❌ Failed to clear the log channel. Please try again.', flags: [MessageFlags.Ephemeral] });
         }
+        recordAudit(interaction.guild.id, interaction.user.id, 'log channel removed (with /remove-logchannel)');
 
         await interaction.reply({
             content: '✅ Log channel removed. Bans are still carried out, but no log is posted.',
