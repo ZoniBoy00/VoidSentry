@@ -73,6 +73,10 @@ async function applySettings(guild, userId, body, { postWarning = postTrapWarnin
     };
     const canPost = channel =>
         Boolean(channel.permissionsFor?.(me)?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages]));
+    // The warning is an embed with the logo attached; without these Discord rejects the message.
+    const canPostWarning = channel =>
+        Boolean(channel.permissionsFor?.(me)?.has([PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.AttachFiles]));
+    const warnings = [];
 
     /** Steps to run once everything has been validated. */
     const steps = [];
@@ -130,7 +134,14 @@ async function applySettings(guild, userId, body, { postWarning = postTrapWarnin
             run: async () => {
                 await guildSettings.addTrapChannel(guild.id, channel.id);
                 // The channel is a trap from now on; the warning is a courtesy and must not undo that.
-                await postWarning(channel).catch(error => logger.warn(`Could not post the trap warning in ${channel.id}: ${error?.message || error}`));
+                if (!canPostWarning(channel)) {
+                    warnings.push(`The warning message was not posted in #${channel.name}: VoidSentry needs the Embed Links and Attach Files permissions there.`);
+                    return;
+                }
+                await postWarning(channel).catch(error => {
+                    logger.warn(`Could not post the trap warning in ${channel.id}: ${error?.message || error}`);
+                    warnings.push(`The trap is active, but the warning message could not be posted in #${channel.name}.`);
+                });
             },
         });
     }
@@ -165,7 +176,7 @@ async function applySettings(guild, userId, body, { postWarning = postTrapWarnin
             .catch(error => logger.error('Could not write the audit log entry.', error));
     }
     logger.info(`Dashboard: ${userId} changed settings of ${guild.name} (${guild.id}): ${changes.join('; ')}`);
-    return { ok: true, changes };
+    return warnings.length ? { ok: true, changes, warnings } : { ok: true, changes };
 }
 
 module.exports = { applySettings, listChannelOptions, listRoleOptions, MAX_REASON_LENGTH, MAX_PURGE_SECONDS };
