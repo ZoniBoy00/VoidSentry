@@ -84,7 +84,15 @@ function makeGuild(id, name, { canBan = true } = {}) {
 }
 
 const guilds = new Map([[GUILD, makeGuild(GUILD, 'Main server')], [OTHER_GUILD, makeGuild(OTHER_GUILD, 'Other', { canBan: false })]]);
-const client = { guilds: { cache: guilds } };
+const client = {
+  guilds: { cache: guilds },
+  users: {
+    fetch: async id => {
+      if (id !== '44444444444444444') throw new Error('Unknown User');
+      return { username: 'alice', globalName: 'Alice' };
+    },
+  },
+};
 
 const revocations = new Map();
 db.loadSessionRevocations = async () => [];
@@ -363,6 +371,8 @@ test('the audit log is available to the same people', async () => {
     const { status, body } = await request(server, `/api/guilds/${GUILD}/audit`);
     assert.equal(status, 200);
     assert.equal(body.entries[0].detail, 'dry-run turned on');
+    assert.equal(body.entries[0].userName, 'Alice');
+    assert.equal(body.entries[0].userTag, 'alice');
     assert.equal((await request(server, `/api/guilds/${GUILD}/audit`, { user: MEMBER })).status, 404);
   });
 });

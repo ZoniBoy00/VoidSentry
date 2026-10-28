@@ -367,10 +367,19 @@ function createDashboardApi(client, { limits = {} } = {}) {
 
                 if (parts[3] === 'audit') {
                     const rows = await db.getAudit(guild.id);
+                    // Names for the people behind the IDs; someone who left the server or deleted their account has none.
+                    const names = new Map();
+                    await Promise.all([...new Set(rows.map(row => row.user_id))].map(async id => {
+                        const member = await guild.members.fetch(id).catch(() => null);
+                        const user = member?.user ?? await client.users.fetch(id).catch(() => null);
+                        if (user) names.set(id, { userName: member?.displayName ?? user.globalName ?? user.username, userTag: user.username });
+                    }));
                     return send(200, {
                         entries: rows.map(row => ({
                             id: row.id,
                             userId: row.user_id,
+                            userName: names.get(row.user_id)?.userName ?? null,
+                            userTag: names.get(row.user_id)?.userTag ?? null,
                             detail: row.detail,
                             createdAt: new Date(row.created_at).toISOString(),
                         })),
