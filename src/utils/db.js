@@ -217,7 +217,7 @@ async function getRecentBannedUsers(guildId, hours, limit) {
     const [rows] = await db.query(
         `SELECT user_id, MAX(user_tag) AS user_tag, MAX(created_at) AS created_at FROM bans
          WHERE guild_id = ? AND created_at >= (NOW() - INTERVAL ? HOUR)
-         GROUP BY user_id ORDER BY created_at DESC LIMIT ?`,
+         GROUP BY user_id ORDER BY MAX(created_at) DESC LIMIT ?`,
         [guildId, hours, limit]
     );
     return rows;

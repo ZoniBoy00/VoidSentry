@@ -19,6 +19,9 @@ const { createLogoAttachment } = require('../utils/helpers');
 const guildSettings = require('../utils/guildSettings');
 const logger = require('../utils/logger');
 
+/** Channels that can be traps; the same list as the dashboard and /trap-settings. */
+const TRAP_CHANNEL_TYPES = [ChannelType.GuildText, ChannelType.GuildAnnouncement];
+
 /** Minimum time between /setup-trap runs per channel (it clears the channel). */
 const COOLDOWN_MS = 30000;
 const lastRun = new Map();
@@ -80,8 +83,9 @@ module.exports = {
                 logger.warn(`Could not create a trap channel in ${interaction.guild.id}: ${error?.message || error}`);
                 return interaction.editReply({ content: '❌ The channel could not be created. Check my permissions and try again.' });
             }
-        } else if (!channel?.isTextBased() || typeof channel.bulkDelete !== 'function') {
-            return interaction.editReply({ content: '❌ This command can only be used in a text channel.' });
+        } else if (!TRAP_CHANNEL_TYPES.includes(channel?.type)) {
+            // Threads, forum posts and voice channel chats are text-based too, but cannot be traps.
+            return interaction.editReply({ content: '❌ Run this in a text or announcement channel, or use the `create` option.' });
         }
 
         // Register the channel for this server

@@ -247,4 +247,19 @@ test('database integration', { skip: !enabled && 'set TEST_DB_HOST to run agains
     assert.equal(await db.countOpenAppeals(OTHER_GUILD), 0);
     assert.equal(await db.isAppealBlocked(OTHER_GUILD, OTHER_USER), false);
   });
+
+  await t.test('recent banned users: one row per user, newest first, only inside the window', async () => {
+    const RECENT_GUILD = '66666666666666666';
+    await db.addBan(ban({ guildId: RECENT_GUILD, userId: USER, userTag: 'first' }));
+    await db.addBan(ban({ guildId: RECENT_GUILD, userId: USER, userTag: 'first' }));
+    await db.addBan(ban({ guildId: RECENT_GUILD, userId: OTHER_USER, userTag: 'second' }));
+    const old = await db.addBan(ban({ guildId: RECENT_GUILD, userId: '77777777777777777', userTag: 'old' }));
+    await query('UPDATE bans SET created_at = NOW() - INTERVAL 3 HOUR WHERE id = ?', [old]);
+    await query('UPDATE bans SET created_at = NOW() - INTERVAL 10 MINUTE WHERE guild_id = ? AND user_id = ?', [RECENT_GUILD, USER]);
+
+    const rows = await db.getRecentBannedUsers(RECENT_GUILD, 1, 10);
+    assert.deepEqual(rows.map(row => row.user_id), [OTHER_USER, USER]);
+    assert.equal((await db.getRecentBannedUsers(RECENT_GUILD, 6, 10)).length, 3);
+    assert.equal((await db.getRecentBannedUsers(RECENT_GUILD, 6, 2)).length, 2);
+  });
 });
