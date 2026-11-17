@@ -50,6 +50,14 @@ test('/help lists every loaded command and marks admin commands', async () => {
   assert.ok(fields.every(f => f.value.length <= 1024));
   assert.deepEqual(payload.flags, [64]);
   assert.match(payload.embeds[0].data.description, /Need help\?\*\* Ask at https:\/\/github\.com\/ZoniBoy00\/VoidSentry\/discussions/);
+
+  const buttons = payload.components[0].toJSON().components;
+  assert.deepEqual(buttons.map(b => [b.label, b.url]), [
+    ['Website', 'https://voidsentry.vercel.app'],
+    ['top.gg', 'https://top.gg/bot/1443959104442863628'],
+    ['Support', 'https://github.com/ZoniBoy00/VoidSentry/discussions'],
+  ]);
+  assert.ok(buttons.every(b => b.style === 5));
 });
 
 test('presence shows server count and, once known, the ban total', async () => {

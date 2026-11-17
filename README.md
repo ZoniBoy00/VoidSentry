@@ -145,6 +145,7 @@ Copy `.env.example` to `.env` and fill in your credentials:
 | `BAN_REASON` | Default ban reason. Servers can override it. |
 | `SUPPORT_URL` | Optional. Support link shown by `/help` (default: this repository's [GitHub Discussions](https://github.com/ZoniBoy00/VoidSentry/discussions)). |
 | `APPEALS_URL` | Optional. Address of the appeal form named in the trap warning and the ban DM on servers with appeals on (default: `https://voidsentry.vercel.app/appeal`). |
+| `WEBSITE_URL`, `TOPGG_URL` | Optional. Link buttons under `/help` and `/status` (defaults: the VoidSentry website and its [top.gg page](https://top.gg/bot/1443959104442863628)). Set one to an empty value to leave its button out. |
 | `STATS_PORT` | Optional. Port of a read-only JSON endpoint (`GET /stats`) with aggregate numbers (servers, members, total bans, bans in the last 7 days) for the website. `0` or empty = disabled. |
 | `STATS_HOST` | Interface for the stats endpoint (default `127.0.0.1`). Keep it on localhost and expose it through a tunnel or reverse proxy. |
 | `STATS_TOKEN` | Optional bearer token the stats endpoint requires. Use a random value of at least 32 characters (for example `openssl rand -hex 32`); the bot logs a warning at start-up if it is shorter. |

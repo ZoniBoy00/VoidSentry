@@ -16,6 +16,7 @@ const guildSettings = require('../utils/guildSettings');
 const logger = require('../utils/logger');
 const { COLORS, LOGO_URL, BRAND_NAME } = require('../utils/constants');
 const { createLogoAttachment, formatTimestamp, sanitizeEmbedText } = require('../utils/helpers');
+const { createLinkRows } = require('../utils/linkButtons');
 const { VERSION } = require('../utils/constants');
 
 module.exports = {
@@ -88,6 +89,6 @@ module.exports = {
 
         embed.setTimestamp().setFooter({ text: `${BRAND_NAME} v${VERSION}`, iconURL: LOGO_URL });
 
-        await interaction.editReply({ embeds: [embed], files: [createLogoAttachment()] });
+        await interaction.editReply({ embeds: [embed], files: [createLogoAttachment()], components: createLinkRows() });
     },
 };

@@ -11,6 +11,7 @@ const { SlashCommandBuilder, EmbedBuilder, MessageFlags, ApplicationCommandOptio
 
 const { COLORS, LOGO_URL, BRAND_NAME, SUPPORT_URL, VERSION } = require('../utils/constants');
 const { createLogoAttachment } = require('../utils/helpers');
+const { createLinkRows } = require('../utils/linkButtons');
 
 /**
  * Describe one command (and its subcommands) for the help embed.
@@ -62,6 +63,7 @@ module.exports = {
         await interaction.reply({
             embeds: [embed],
             files: [createLogoAttachment()],
+            components: createLinkRows(),
             flags: [MessageFlags.Ephemeral],
         });
     },

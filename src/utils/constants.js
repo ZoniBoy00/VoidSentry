@@ -37,6 +37,17 @@ const SUPPORT_URL = process.env.SUPPORT_URL?.trim() || 'https://github.com/ZoniB
 const APPEALS_URL = process.env.APPEALS_URL?.trim() || 'https://voidsentry.vercel.app/appeal';
 
 /**
+ * Link buttons under /help and /status. Self-hosted copies can point them elsewhere, or set the
+ * variable to an empty value to leave that button out.
+ */
+function linkFromEnv(name, fallback) {
+    const value = process.env[name];
+    return value === undefined ? fallback : value.trim();
+}
+const WEBSITE_URL = linkFromEnv('WEBSITE_URL', 'https://voidsentry.vercel.app');
+const TOPGG_URL = linkFromEnv('TOPGG_URL', 'https://top.gg/bot/1443959104442863628');
+
+/**
  * Get ban reason from config.
  * Loaded dynamically from environment at runtime.
  * 
@@ -58,6 +69,8 @@ module.exports = {
     BRAND_LOGGING,
     SUPPORT_URL,
     APPEALS_URL,
+    WEBSITE_URL,
+    TOPGG_URL,
     VERSION,
     getBanReason,
 };
