@@ -33,6 +33,9 @@ const BRAND_LOGGING = `${BRAND_NAME} Logging`;
 /** Where people ask for help. Self-hosted copies can point it at their own place with SUPPORT_URL. */
 const SUPPORT_URL = process.env.SUPPORT_URL?.trim() || 'https://github.com/ZoniBoy00/VoidSentry/discussions';
 
+/** The website's appeal form, named in the warning and the ban DM on servers that accept appeals. */
+const APPEALS_URL = process.env.APPEALS_URL?.trim() || 'https://voidsentry.vercel.app/appeal';
+
 /**
  * Get ban reason from config.
  * Loaded dynamically from environment at runtime.
@@ -54,6 +57,7 @@ module.exports = {
     BRAND_SECURITY,
     BRAND_LOGGING,
     SUPPORT_URL,
+    APPEALS_URL,
     VERSION,
     getBanReason,
 };

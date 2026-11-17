@@ -71,7 +71,7 @@ module.exports = {
 
         // Send warning embed
         await channel.send({
-            embeds: [createWarningEmbed()],
+            embeds: [createWarningEmbed(guildSettings.getGuildConfig(interaction.guild.id))],
             files: [createLogoAttachment()],
         });
 

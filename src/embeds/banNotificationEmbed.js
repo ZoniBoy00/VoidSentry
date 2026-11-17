@@ -9,23 +9,26 @@
  */
 
 const { EmbedBuilder } = require('discord.js');
-const { COLORS, LOGO_URL, BRAND_SECURITY } = require('../utils/constants');
+const { COLORS, LOGO_URL, BRAND_SECURITY, APPEALS_URL } = require('../utils/constants');
 
 /**
  * Creates an embed to send to the user before banning.
  * 
  * @param {string} guildName - Name of the server where ban occurred
  * @param {string} reason - Ban reason
+ * @param {{appealsEnabled?: boolean}} [options] - Whether the server accepts appeals
  * @returns {import('discord.js').EmbedBuilder} Notification embed
  */
-function createBanNotificationEmbed(guildName, reason) {
+function createBanNotificationEmbed(guildName, reason, { appealsEnabled = false } = {}) {
     return new EmbedBuilder()
         .setColor(COLORS.DANGER)
         .setTitle('🔨 You Have Been Banned')
         .setAuthor({ name: BRAND_SECURITY, iconURL: LOGO_URL })
         .setDescription(
             `You have been **permanently banned** from **${guildName}**.\n\n` +
-            'This action was taken automatically by the security system and cannot be appealed.'
+            (appealsEnabled
+                ? `This action was taken automatically by the security system. If it was a mistake, you can appeal at ${APPEALS_URL}`
+                : 'This action was taken automatically by the security system and cannot be appealed.')
         )
         .addFields(
             {

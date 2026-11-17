@@ -285,19 +285,19 @@ async function getUniqueUserCount(guildId = null) {
  */
 async function loadGuildSettings() {
     const db = await getPool();
-    const [settings] = await db.query(`SELECT guild_id, log_channel_id, ban_reason, delete_message_seconds, dry_run FROM guild_settings`);
+    const [settings] = await db.query(`SELECT guild_id, log_channel_id, ban_reason, delete_message_seconds, dry_run, appeals_enabled, appeal_cooldown_days FROM guild_settings`);
     const [channels] = await db.query(`SELECT channel_id, guild_id FROM trap_channels`);
     const [exemptRoles] = await db.query(`SELECT guild_id, role_id FROM exempt_roles`);
     return { settings, channels, exemptRoles };
 }
 
-const GUILD_SETTING_COLUMNS = new Set(['log_channel_id', 'ban_reason', 'delete_message_seconds', 'dry_run']);
+const GUILD_SETTING_COLUMNS = new Set(['log_channel_id', 'ban_reason', 'delete_message_seconds', 'dry_run', 'appeals_enabled', 'appeal_cooldown_days']);
 
 /**
  * Set (or clear with null) one per-server setting.
  *
  * @param {string} guildId - Server ID
- * @param {'log_channel_id'|'ban_reason'|'delete_message_seconds'|'dry_run'} column - Setting column
+ * @param {'log_channel_id'|'ban_reason'|'delete_message_seconds'|'dry_run'|'appeals_enabled'|'appeal_cooldown_days'} column - Setting column
  * @param {string|number|null} value - New value, or null to fall back to the global default
  */
 async function setGuildSetting(guildId, column, value) {
@@ -346,6 +346,9 @@ async function removeGuildData(guildId) {
     await db.query(`DELETE FROM exempt_roles WHERE guild_id = ?`, [guildId]);
     await db.query(`DELETE FROM guild_settings WHERE guild_id = ?`, [guildId]);
     await db.query(`DELETE FROM audit_log WHERE guild_id = ?`, [guildId]);
+    // Nobody could decide them any more.
+    await db.query(`DELETE FROM appeals WHERE guild_id = ?`, [guildId]);
+    await db.query(`DELETE FROM appeal_blocks WHERE guild_id = ?`, [guildId]);
 }
 
 /**
@@ -451,6 +454,188 @@ async function purgeOldMessageContent(days) {
     return result.affectedRows;
 }
 
+/** Columns of an appeal as the API and the bot use them. */
+const APPEAL_COLUMNS = 'id, guild_id, user_id, user_tag, text, status, reply, decided_by, created_at, decided_at';
+
+/**
+ * Store a new, open ban appeal.
+ *
+ * @param {{guildId: string, userId: string, userTag: string, text: string}} appeal - Who appeals where, and what they wrote
+ * @returns {Promise<number>} The appeal's ID
+ */
+async function addAppeal({ guildId, userId, userTag, text }) {
+    const db = await getPool();
+    const [result] = await db.query(
+        'INSERT INTO appeals (guild_id, user_id, user_tag, text) VALUES (?, ?, ?, ?)',
+        [guildId, userId, userTag.slice(0, 100), text.slice(0, 1000)]
+    );
+    return result.insertId;
+}
+
+/**
+ * One appeal by ID.
+ *
+ * @param {number} id - Appeal ID
+ * @returns {Promise<Object|null>}
+ */
+async function getAppeal(id) {
+    const db = await getPool();
+    const [rows] = await db.query(`SELECT ${APPEAL_COLUMNS} FROM appeals WHERE id = ?`, [id]);
+    return rows[0] ?? null;
+}
+
+/**
+ * Every appeal a user made, newest first.
+ *
+ * @param {string} userId - Discord user ID
+ * @returns {Promise<Object[]>}
+ */
+async function getAppealsByUser(userId) {
+    const db = await getPool();
+    const [rows] = await db.query(
+        `SELECT ${APPEAL_COLUMNS} FROM appeals WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 100`,
+        [userId]
+    );
+    return rows;
+}
+
+/**
+ * A server's open appeals (oldest first, so the longest waiting comes first) or decided ones (newest first).
+ *
+ * @param {string} guildId - Server ID
+ * @param {'open'|'decided'} which - Which appeals
+ * @param {number} [limit] - Most rows to return
+ * @returns {Promise<Object[]>}
+ */
+async function getGuildAppeals(guildId, which, limit = 50) {
+    const db = await getPool();
+    const [rows] = which === 'open'
+        ? await db.query(`SELECT ${APPEAL_COLUMNS} FROM appeals WHERE guild_id = ? AND status = 'open' ORDER BY created_at ASC, id ASC LIMIT ?`, [guildId, limit])
+        : await db.query(`SELECT ${APPEAL_COLUMNS} FROM appeals WHERE guild_id = ? AND status <> 'open' ORDER BY decided_at DESC, id DESC LIMIT ?`, [guildId, limit]);
+    return rows;
+}
+
+/**
+ * Number of open appeals on a server.
+ *
+ * @param {string} guildId - Server ID
+ * @returns {Promise<number>}
+ */
+async function countOpenAppeals(guildId) {
+    const db = await getPool();
+    const [rows] = await db.query("SELECT COUNT(*) AS count FROM appeals WHERE guild_id = ? AND status = 'open'", [guildId]);
+    return Number(rows[0].count);
+}
+
+/**
+ * Decide an open appeal. Only one decision can win: an appeal that was already
+ * decided is left alone and false is returned.
+ *
+ * @param {number} id - Appeal ID
+ * @param {{status: 'approved'|'denied', reply: string|null, decidedBy: string}} decision
+ * @returns {Promise<boolean>} Whether this call decided it
+ */
+async function decideAppeal(id, { status, reply, decidedBy }) {
+    const db = await getPool();
+    const [result] = await db.query(
+        "UPDATE appeals SET status = ?, reply = ?, decided_by = ?, decided_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'open'",
+        [status, reply ? reply.slice(0, 500) : null, decidedBy, id]
+    );
+    return result.affectedRows === 1;
+}
+
+/**
+ * Put a decided appeal back to open, when the decision could not be carried out
+ * (for example the unban failed).
+ *
+ * @param {number} id - Appeal ID
+ */
+async function reopenAppeal(id) {
+    const db = await getPool();
+    await db.query("UPDATE appeals SET status = 'open', reply = NULL, decided_by = NULL, decided_at = NULL WHERE id = ?", [id]);
+}
+
+/**
+ * Whether a user may no longer appeal on a server.
+ *
+ * @param {string} guildId - Server ID
+ * @param {string} userId - Discord user ID
+ * @returns {Promise<boolean>}
+ */
+async function isAppealBlocked(guildId, userId) {
+    const db = await getPool();
+    const [rows] = await db.query('SELECT 1 FROM appeal_blocks WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
+    return rows.length > 0;
+}
+
+/**
+ * Stop a user from appealing on a server.
+ *
+ * @param {string} guildId - Server ID
+ * @param {string} userId - Discord user ID
+ * @param {string} blockedBy - Who blocked them
+ */
+async function addAppealBlock(guildId, userId, blockedBy) {
+    const db = await getPool();
+    await db.query('INSERT IGNORE INTO appeal_blocks (guild_id, user_id, blocked_by) VALUES (?, ?, ?)', [guildId, userId, blockedBy]);
+}
+
+/**
+ * Let a blocked user appeal again.
+ *
+ * @param {string} guildId - Server ID
+ * @param {string} userId - Discord user ID
+ * @returns {Promise<boolean>} Whether they were blocked
+ */
+async function removeAppealBlock(guildId, userId) {
+    const db = await getPool();
+    const [result] = await db.query('DELETE FROM appeal_blocks WHERE guild_id = ? AND user_id = ?', [guildId, userId]);
+    return result.affectedRows > 0;
+}
+
+/**
+ * Users blocked from appealing on a server, newest first.
+ *
+ * @param {string} guildId - Server ID
+ * @returns {Promise<Object[]>}
+ */
+async function getAppealBlocks(guildId) {
+    const db = await getPool();
+    const [rows] = await db.query(
+        'SELECT user_id, blocked_by, created_at FROM appeal_blocks WHERE guild_id = ? ORDER BY created_at DESC LIMIT 100',
+        [guildId]
+    );
+    return rows;
+}
+
+/**
+ * Delete a user's appeals and appeal blocks everywhere (data deletion request).
+ *
+ * @param {string} userId - Discord user ID
+ * @returns {Promise<number>} Number of appeals deleted
+ */
+async function deleteAppealsByUser(userId) {
+    const db = await getPool();
+    const [result] = await db.query('DELETE FROM appeals WHERE user_id = ?', [userId]);
+    await db.query('DELETE FROM appeal_blocks WHERE user_id = ?', [userId]);
+    return result.affectedRows;
+}
+
+/**
+ * Delete appeals decided more than N days ago. Open appeals are kept.
+ *
+ * @param {number} days - Retention period in days
+ * @returns {Promise<number>} Number of appeals deleted
+ */
+async function purgeDecidedAppeals(days) {
+    const db = await getPool();
+    const [result] = await db.query(
+        "DELETE FROM appeals WHERE status <> 'open' AND decided_at < (NOW() - INTERVAL ? DAY)",
+        [days]
+    );
+    return result.affectedRows;
+}
+
 /**
  * Close the database connection pool.
  */
@@ -487,5 +672,18 @@ module.exports = {
     removeExemptRole,
     purgeOldMessageContent,
     deleteBansByUser,
+    addAppeal,
+    getAppeal,
+    getAppealsByUser,
+    getGuildAppeals,
+    countOpenAppeals,
+    decideAppeal,
+    reopenAppeal,
+    isAppealBlocked,
+    addAppealBlock,
+    removeAppealBlock,
+    getAppealBlocks,
+    deleteAppealsByUser,
+    purgeDecidedAppeals,
     closePool,
 };

@@ -12,6 +12,7 @@ const { Events, MessageFlags } = require('discord.js');
 const logger = require('../utils/logger');
 const { hasAdminPermission, isOwner } = require('../utils/permissions');
 const { UNBAN_PREFIX, handleUnbanButton } = require('../utils/unbanButton');
+const { BUTTON_PREFIX: APPEAL_PREFIX, MODAL_PREFIX: APPEAL_MODAL_PREFIX, handleAppealButton, handleAppealModal } = require('../utils/appeals');
 
 module.exports = {
     /** Event name for Discord.js */
@@ -29,6 +30,14 @@ module.exports = {
         // The unban button on ban log messages
         if (interaction.isButton() && interaction.customId.startsWith(UNBAN_PREFIX)) {
             return handleUnbanButton(interaction).catch(err => logger.error('Unban button failed', err));
+        }
+
+        // Approve and Deny on appeal posts, and the Deny reply form
+        if (interaction.isButton() && interaction.customId.startsWith(APPEAL_PREFIX)) {
+            return handleAppealButton(interaction).catch(err => logger.error('Appeal button failed', err));
+        }
+        if (interaction.isModalSubmit() && interaction.customId.startsWith(APPEAL_MODAL_PREFIX)) {
+            return handleAppealModal(interaction).catch(err => logger.error('Appeal form failed', err));
         }
 
         // Only handle chat input commands (slash commands)

@@ -78,6 +78,35 @@ const MIGRATIONS = [
             ) ${TABLE_OPTIONS}`,
         ],
     },
+    {
+        version: 4,
+        name: 'ban appeals',
+        statements: [
+            // NULL = off; servers turn appeals on from the dashboard. NULL cooldown = the default.
+            'ALTER TABLE guild_settings ADD COLUMN appeals_enabled TINYINT(1) NULL, ADD COLUMN appeal_cooldown_days INT NULL',
+            `CREATE TABLE IF NOT EXISTS appeals (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                guild_id VARCHAR(20) NOT NULL,
+                user_id VARCHAR(20) NOT NULL,
+                user_tag VARCHAR(100) NOT NULL,
+                text VARCHAR(1000) NOT NULL,
+                status VARCHAR(10) NOT NULL DEFAULT 'open',
+                reply VARCHAR(500) NULL,
+                decided_by VARCHAR(20) NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                decided_at TIMESTAMP NULL DEFAULT NULL,
+                INDEX idx_appeals_guild (guild_id, status, created_at),
+                INDEX idx_appeals_user (user_id, guild_id, created_at)
+            ) ${TABLE_OPTIONS}`,
+            `CREATE TABLE IF NOT EXISTS appeal_blocks (
+                guild_id VARCHAR(20) NOT NULL,
+                user_id VARCHAR(20) NOT NULL,
+                blocked_by VARCHAR(20) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (guild_id, user_id)
+            ) ${TABLE_OPTIONS}`,
+        ],
+    },
 ];
 
 /**

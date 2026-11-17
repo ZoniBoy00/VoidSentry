@@ -24,7 +24,7 @@ module.exports = {
     /** Command definition for Discord */
     data: new SlashCommandBuilder()
         .setName('purge-user')
-        .setDescription('Bot owner only: delete all stored ban records of a user (data deletion request).')
+        .setDescription('Bot owner only: delete all stored ban records and appeals of a user (data deletion request).')
         .addStringOption(opt => opt.setName('user_id').setDescription('Discord User ID').setRequired(true)),
 
     /**
@@ -46,12 +46,13 @@ module.exports = {
 
         try {
             const deleted = await db.deleteBansByUser(userId);
+            const appeals = await db.deleteAppealsByUser(userId);
             stats.forgetUser(userId);
-            logger.info(`Data deletion: removed ${deleted} ban record(s) for user ${userId}.`);
+            logger.info(`Data deletion: removed ${deleted} ban record(s) and ${appeals} appeal(s) for user ${userId}.`);
             await interaction.editReply({
-                content: deleted > 0
-                    ? `✅ Deleted **${deleted}** ban record(s) for \`${userId}\`. Any active Discord bans are unchanged (use \`/unban\` on each server to lift them).`
-                    : `ℹ️ No stored ban records found for \`${userId}\`.`,
+                content: deleted > 0 || appeals > 0
+                    ? `✅ Deleted **${deleted}** ban record(s) and **${appeals}** appeal(s) for \`${userId}\`. Any active Discord bans are unchanged (use \`/unban\` on each server to lift them).`
+                    : `ℹ️ No stored ban records or appeals found for \`${userId}\`.`,
             });
         } catch (error) {
             logger.error(`Failed to purge data for user ${userId}.`, error);

@@ -22,6 +22,7 @@ const ALERTS = {
     'missing-permission': 'I tried to ban someone who wrote in a trap channel, but I do not have the **Ban Members** permission. Give my role that permission, then the next violation will be handled.',
     hierarchy: 'I tried to ban someone who wrote in a trap channel, but my role is not above theirs. In **Server Settings → Roles**, drag the VoidSentry role above the roles of the members it should be able to ban.',
     'ban-failed': 'I tried to ban someone who wrote in a trap channel, but Discord rejected the request. Check that my role has **Ban Members** and is high enough in the role list.',
+    appeal: 'Someone I banned has appealed the ban. Approve or deny it in your log channel or on the VoidSentry dashboard.',
 };
 
 /**

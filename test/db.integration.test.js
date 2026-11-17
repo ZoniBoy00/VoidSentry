@@ -189,9 +189,62 @@ test('database integration', { skip: !enabled && 'set TEST_DB_HOST to run agains
     assert.deepEqual(rows.map(row => [row.user_id, Number(row.revoked_before)]), [[USER, 2000]]);
   });
 
-  await t.test('a data deletion request removes every ban of the user', async () => {
+  await t.test('appeals: store, list, decide once, block, reopen and expire', async () => {
+    await db.setGuildSetting(OTHER_GUILD, 'appeals_enabled', 1);
+    await db.setGuildSetting(OTHER_GUILD, 'appeal_cooldown_days', 3);
+    const settings = (await db.loadGuildSettings()).settings.find(row => row.guild_id === OTHER_GUILD);
+    assert.equal(Number(settings.appeals_enabled), 1);
+    assert.equal(Number(settings.appeal_cooldown_days), 3);
+
+    const first = await db.addAppeal({ guildId: OTHER_GUILD, userId: USER, userTag: 'spammer', text: 'It was my cat 🐈' });
+    const second = await db.addAppeal({ guildId: OTHER_GUILD, userId: OTHER_USER, userTag: 'other', text: 'x'.repeat(1200) });
+    assert.equal((await db.getAppeal(first)).text, 'It was my cat 🐈');
+    assert.equal((await db.getAppeal(second)).text.length, 1000);
+    assert.equal((await db.getAppeal(first)).status, 'open');
+    assert.equal(await db.getAppeal(999999), null);
+    assert.equal(await db.countOpenAppeals(OTHER_GUILD), 2);
+    assert.deepEqual((await db.getGuildAppeals(OTHER_GUILD, 'open')).map(row => row.id), [first, second]);
+    assert.deepEqual((await db.getAppealsByUser(USER)).map(row => row.id), [first]);
+
+    assert.equal(await db.decideAppeal(first, { status: 'denied', reply: 'No.', decidedBy: OTHER_USER }), true);
+    assert.equal(await db.decideAppeal(first, { status: 'approved', reply: null, decidedBy: OTHER_USER }), false);
+    const decided = await db.getAppeal(first);
+    assert.equal(decided.status, 'denied');
+    assert.ok(decided.decided_at instanceof Date);
+    assert.deepEqual((await db.getGuildAppeals(OTHER_GUILD, 'decided')).map(row => row.id), [first]);
+
+    await db.reopenAppeal(first);
+    assert.equal((await db.getAppeal(first)).status, 'open');
+    assert.equal((await db.getAppeal(first)).decided_at, null);
+    await db.decideAppeal(first, { status: 'denied', reply: null, decidedBy: OTHER_USER });
+
+    await db.addAppealBlock(OTHER_GUILD, USER, OTHER_USER);
+    await db.addAppealBlock(OTHER_GUILD, USER, OTHER_USER);
+    assert.equal(await db.isAppealBlocked(OTHER_GUILD, USER), true);
+    assert.equal((await db.getAppealBlocks(OTHER_GUILD)).length, 1);
+    assert.equal(await db.removeAppealBlock(OTHER_GUILD, USER), true);
+    assert.equal(await db.removeAppealBlock(OTHER_GUILD, USER), false);
+    await db.addAppealBlock(OTHER_GUILD, USER, OTHER_USER);
+
+    await query('UPDATE appeals SET decided_at = NOW() - INTERVAL 100 DAY WHERE id = ?', [first]);
+    assert.equal(await db.purgeDecidedAppeals(90), 1);
+    assert.equal(await db.getAppeal(second).then(row => row.status), 'open');
+    await db.addAppeal({ guildId: OTHER_GUILD, userId: USER, userTag: 'spammer', text: 'One more try.' });
+  });
+
+  await t.test('a data deletion request removes every ban and appeal of the user', async () => {
+    assert.equal(await db.deleteAppealsByUser(USER), 1);
+    assert.equal(await db.isAppealBlocked(OTHER_GUILD, USER), false);
+    assert.equal(await db.countOpenAppeals(OTHER_GUILD), 1);
     assert.equal(await db.deleteBansByUser(USER), 2);
     assert.equal((await db.findBansByUserId(USER)).length, 0);
     assert.equal(Number(await db.getBanCount()), 1);
+  });
+
+  await t.test('leaving a server also removes its appeals and appeal blocks', async () => {
+    await db.addAppealBlock(OTHER_GUILD, OTHER_USER, USER);
+    await db.removeGuildData(OTHER_GUILD);
+    assert.equal(await db.countOpenAppeals(OTHER_GUILD), 0);
+    assert.equal(await db.isAppealBlocked(OTHER_GUILD, OTHER_USER), false);
   });
 });

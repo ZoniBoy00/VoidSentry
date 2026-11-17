@@ -24,6 +24,10 @@
  *   GET  /api/guilds/:id/audit      recent settings changes made through the dashboard
  *   POST /api/guilds/:id/settings   change settings (see dashboardSettings.js)
  *   POST /api/guilds/:id/unban      lift a Discord ban ({userId}), with an audit entry
+ *   GET  /api/guilds/:id/appeals    open and decided appeals, and who may not appeal
+ *   POST /api/guilds/:id/appeals    decide an appeal ({appealId, decision: 'approve'|'deny', reply?, block?})
+ *   GET  /api/appeals               the signed-in person's own bans and appeals (any user, no server rights needed)
+ *   POST /api/appeals               file an appeal ({guildId, text}); own rate limit
  *   GET  /api/admin/overview        every server and the global totals (owner only)
  *   GET  /api/admin/bans            ban history across all servers (owner only)
  *   GET  /api/admin/stats           ban statistics of all servers for the last 30 days (owner only)
@@ -39,6 +43,7 @@ const CONFIG = require('../config');
 const { summarizeBans } = require('./banStats');
 const db = require('./db');
 const guildSettings = require('./guildSettings');
+const appeals = require('./appeals');
 const { applySettings, canPostWarning, listChannelOptions, listRoleOptions } = require('./dashboardSettings');
 const logger = require('./logger');
 const { createRateLimiter } = require('./rateLimit');
@@ -66,6 +71,9 @@ const STATS_DAYS = 30;
  * Searches hit the database hardest and have their own, lower limit.
  */
 const DEFAULT_LIMITS = { perUser: 120, searchesPerUser: 20, total: 1200, windowMs: 60 * 1000 };
+
+/** New appeals per person and in total each hour; one open appeal per server is enforced separately. */
+const APPEAL_LIMITS = { perUser: 5, total: 200, windowMs: 60 * 60 * 1000 };
 
 /**
  * Lookups in flight, by server and user. Requests that arrive while one is
@@ -108,6 +116,22 @@ async function manageableGuild(client, guildId, userId) {
     return (await isAdministrator(guild, userId)) ? guild : null;
 }
 
+/**
+ * Display names for user IDs, looked up in the server first. Someone who left
+ * the server or deleted their account has no entry.
+ *
+ * @returns {Promise<Map<string, {userName: string, userTag: string}>>}
+ */
+async function lookupNames(client, guild, ids) {
+    const names = new Map();
+    await Promise.all([...new Set(ids)].map(async id => {
+        const member = await guild.members.fetch(id).catch(() => null);
+        const user = member?.user ?? await client.users.fetch(id).catch(() => null);
+        if (user) names.set(id, { userName: member?.displayName ?? user.globalName ?? user.username, userTag: user.username });
+    }));
+    return names;
+}
+
 /** `{id, name}` for a channel or role, falling back to the ID if it no longer exists. */
 function named(collection, id) {
     return { id, name: collection.get(id)?.name ?? null };
@@ -122,7 +146,9 @@ function named(collection, id) {
 async function describeGuild(guild) {
     const config = guildSettings.getGuildConfig(guild.id);
     const trapChannelIds = guildSettings.listTrapChannels(guild.id);
-    const [bans, uniqueUsers] = await Promise.all([db.getBanCount(guild.id), db.getUniqueUserCount(guild.id)]);
+    const [bans, uniqueUsers, openAppeals] = await Promise.all([
+        db.getBanCount(guild.id), db.getUniqueUserCount(guild.id), db.countOpenAppeals(guild.id),
+    ]);
     const me = guild.members.me;
 
     return {
@@ -139,6 +165,8 @@ async function describeGuild(guild) {
             dryRun: config.dryRun,
             trapChannels: trapChannelIds.map(id => named(guild.channels.cache, id)),
             exemptRoles: config.exemptRoleIds.map(id => named(guild.roles.cache, id)),
+            appealsEnabled: config.appealsEnabled,
+            appealCooldownDays: config.appealCooldownDays,
         },
         health: {
             canBan: Boolean(me?.permissions?.has(PermissionFlagsBits.BanMembers)),
@@ -150,7 +178,7 @@ async function describeGuild(guild) {
                 .filter(channel => channel && !canPostWarning(channel, me))
                 .map(channel => ({ id: channel.id, name: channel.name })),
         },
-        totals: { bans: Number(bans), uniqueUsers: Number(uniqueUsers) },
+        totals: { bans: Number(bans), uniqueUsers: Number(uniqueUsers), openAppeals: Number(openAppeals) },
         options: { channels: listChannelOptions(guild), roles: listRoleOptions(guild) },
     };
 }
@@ -215,6 +243,8 @@ function createDashboardApi(client, { limits = {} } = {}) {
     const userLimiter = createRateLimiter({ limit: perUser, windowMs });
     const searchLimiter = createRateLimiter({ limit: searchesPerUser, windowMs });
     const totalLimiter = createRateLimiter({ limit: total, windowMs });
+    const appealUserLimiter = createRateLimiter({ limit: APPEAL_LIMITS.perUser, windowMs: APPEAL_LIMITS.windowMs });
+    const appealTotalLimiter = createRateLimiter({ limit: APPEAL_LIMITS.total, windowMs: APPEAL_LIMITS.windowMs });
 
     return async function handle(req, res, url) {
         const send = (status, body) => {
@@ -249,6 +279,20 @@ function createDashboardApi(client, { limits = {} } = {}) {
                 await sessionRevocations.revokeAll(userId);
                 logger.info(`Dashboard: ${userId} signed out of every session.`);
                 return send(200, { ok: true });
+            }
+
+            // Appeals are for anyone VoidSentry banned: they only ever see and change their own.
+            if (parts[1] === 'appeals' && parts.length === 2) {
+                if (req.method === 'GET') return send(200, { servers: await appeals.listForAppellant(client, userId) });
+                if (req.method !== 'POST') return send(405, { error: 'method not allowed' });
+                const body = await readJson(req);
+                const guildId = String(body?.guildId ?? '');
+                if (!SNOWFLAKE.test(guildId)) return send(422, { ok: false, error: 'Choose a server.' });
+                const allowed = [appealUserLimiter.hit(userId), appealTotalLimiter.hit('all')];
+                if (allowed.includes(false)) return send(429, { error: 'too many requests' });
+                const user = await client.users.fetch(userId).catch(() => null);
+                const result = await appeals.submitAppeal(client, { userId, userTag: user?.username ?? userId, guildId, text: body?.text });
+                return send(result.ok ? 200 : 422, result);
             }
 
             if (parts[1] === 'admin') {
@@ -312,14 +356,15 @@ function createDashboardApi(client, { limits = {} } = {}) {
                     const target = String(body?.userId ?? '');
                     if (!SNOWFLAKE.test(target)) return send(400, { error: 'invalid userId' });
                     const deleted = await db.deleteBansByUser(target);
-                    logger.info(`Dashboard: owner ${userId} deleted ${deleted} ban record(s) of ${target}.`);
-                    return send(200, { deleted: Number(deleted) });
+                    const deletedAppeals = await db.deleteAppealsByUser(target);
+                    logger.info(`Dashboard: owner ${userId} deleted ${deleted} ban record(s) and ${deletedAppeals} appeal(s) of ${target}.`);
+                    return send(200, { deleted: Number(deleted), deletedAppeals: Number(deletedAppeals) });
                 }
 
                 return send(404, { error: 'not found' });
             }
 
-            const isGuildWrite = req.method === 'POST' && parts[1] === 'guilds' && (parts[3] === 'settings' || parts[3] === 'unban');
+            const isGuildWrite = req.method === 'POST' && parts[1] === 'guilds' && ['settings', 'unban', 'appeals'].includes(parts[3]);
             if (req.method !== 'GET' && !isGuildWrite) return send(405, { error: 'method not allowed' });
 
             if (parts.length === 2 && parts[1] === 'me') return send(200, { isOwner: isBotOwner });
@@ -371,15 +416,39 @@ function createDashboardApi(client, { limits = {} } = {}) {
                     return send(200, { ok: true });
                 }
 
+                if (parts[3] === 'appeals' && req.method === 'POST') {
+                    const body = await readJson(req);
+                    const result = await appeals.decideAppealFor(guild, {
+                        appealId: body?.appealId,
+                        deciderId: userId,
+                        decision: body?.decision,
+                        reply: body?.reply ?? null,
+                        block: body?.block === true,
+                    });
+                    return send(result.ok ? 200 : 422, result);
+                }
+
+                if (parts[3] === 'appeals') {
+                    const [open, decided, blocked] = await Promise.all([
+                        db.getGuildAppeals(guild.id, 'open'),
+                        db.getGuildAppeals(guild.id, 'decided', 25),
+                        db.getAppealBlocks(guild.id),
+                    ]);
+                    // The ban each open appeal is about, so it can be judged without searching.
+                    const bans = new Map(await Promise.all(open.map(async row => [row.id, (await db.findBansByUserId(row.user_id, guild.id))[0] ?? null])));
+                    const names = await lookupNames(client, guild, decided.map(row => row.decided_by).filter(Boolean));
+                    const decider = id => (id ? { id, name: names.get(id)?.userName ?? null } : null);
+                    return send(200, {
+                        enabled: guildSettings.getGuildConfig(guild.id).appealsEnabled,
+                        open: open.map(row => ({ ...appeals.appealJson(row), ban: bans.get(row.id) ? banJson(bans.get(row.id)) : null })),
+                        decided: decided.map(row => ({ ...appeals.appealJson(row), decider: decider(row.decided_by) })),
+                        blocked: blocked.map(row => ({ userId: row.user_id, createdAt: new Date(row.created_at).toISOString() })),
+                    });
+                }
+
                 if (parts[3] === 'audit') {
                     const rows = await db.getAudit(guild.id);
-                    // Names for the people behind the IDs; someone who left the server or deleted their account has none.
-                    const names = new Map();
-                    await Promise.all([...new Set(rows.map(row => row.user_id))].map(async id => {
-                        const member = await guild.members.fetch(id).catch(() => null);
-                        const user = member?.user ?? await client.users.fetch(id).catch(() => null);
-                        if (user) names.set(id, { userName: member?.displayName ?? user.globalName ?? user.username, userTag: user.username });
-                    }));
+                    const names = await lookupNames(client, guild, rows.map(row => row.user_id));
                     return send(200, {
                         entries: rows.map(row => ({
                             id: row.id,

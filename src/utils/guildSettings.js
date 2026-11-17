@@ -11,6 +11,9 @@
 const CONFIG = require('../config');
 const db = require('./db');
 
+/** Days a person waits after a denied appeal before they may appeal again, unless the server sets its own. */
+const DEFAULT_APPEAL_COOLDOWN_DAYS = 7;
+
 /** channelId -> guildId */
 const trapChannels = new Map();
 /** guildId -> { logChannelId, banReason, deleteMessageSeconds, dryRun } */
@@ -31,6 +34,8 @@ async function load() {
             banReason: row.ban_reason,
             deleteMessageSeconds: row.delete_message_seconds,
             dryRun: row.dry_run === null || row.dry_run === undefined ? null : Boolean(row.dry_run),
+            appealsEnabled: Boolean(row.appeals_enabled),
+            appealCooldownDays: row.appeal_cooldown_days ?? null,
         });
     }
     for (const row of data.exemptRoles || []) {
@@ -55,7 +60,7 @@ function isTrapChannel(guildId, channelId) {
  * Effective configuration for a server (stored values over global defaults).
  *
  * @param {string} guildId - Server ID
- * @returns {{logChannelId: string|null, banReason: string, deleteMessageSeconds: number, dryRun: boolean, exemptRoleIds: string[]}}
+ * @returns {{logChannelId: string|null, banReason: string, deleteMessageSeconds: number, dryRun: boolean, exemptRoleIds: string[], appealsEnabled: boolean, appealCooldownDays: number}}
  */
 function getGuildConfig(guildId) {
     const stored = settings.get(guildId) || {};
@@ -65,6 +70,9 @@ function getGuildConfig(guildId) {
         deleteMessageSeconds: stored.deleteMessageSeconds ?? CONFIG.DELETE_MESSAGE_SECONDS,
         dryRun: Boolean(stored.dryRun),
         exemptRoleIds: [...(exemptRoles.get(guildId) || [])],
+        // Off unless the server turned them on.
+        appealsEnabled: Boolean(stored.appealsEnabled),
+        appealCooldownDays: stored.appealCooldownDays ?? DEFAULT_APPEAL_COOLDOWN_DAYS,
     };
 }
 
@@ -116,6 +124,8 @@ const setLogChannel = (guildId, channelId) => updateSetting(guildId, 'log_channe
 const setBanReason = (guildId, reason) => updateSetting(guildId, 'ban_reason', 'banReason', reason);
 const setDeleteMessageSeconds = (guildId, seconds) => updateSetting(guildId, 'delete_message_seconds', 'deleteMessageSeconds', seconds);
 const setDryRun = (guildId, enabled) => updateSetting(guildId, 'dry_run', 'dryRun', enabled ? 1 : 0);
+const setAppealsEnabled = (guildId, enabled) => updateSetting(guildId, 'appeals_enabled', 'appealsEnabled', enabled ? 1 : 0);
+const setAppealCooldownDays = (guildId, days) => updateSetting(guildId, 'appeal_cooldown_days', 'appealCooldownDays', days);
 
 module.exports = {
     load,
@@ -131,4 +141,7 @@ module.exports = {
     setBanReason,
     setDeleteMessageSeconds,
     setDryRun,
+    setAppealsEnabled,
+    setAppealCooldownDays,
+    DEFAULT_APPEAL_COOLDOWN_DAYS,
 };

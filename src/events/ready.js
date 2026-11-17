@@ -17,15 +17,25 @@ const guildSettings = require('../utils/guildSettings');
 const presence = require('../utils/presence');
 const sessionRevocations = require('../utils/sessionRevocations');
 const { startStatsServer } = require('../utils/statsServer');
+const { DECIDED_RETENTION_DAYS } = require('../utils/appeals');
 
 const RETENTION_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
-/** Periodically clear old captured message content (see MESSAGE_RETENTION_DAYS). */
+/**
+ * Once a day: clear old captured message content (see MESSAGE_RETENTION_DAYS)
+ * and delete appeals decided more than DECIDED_RETENTION_DAYS ago.
+ */
 function scheduleRetention() {
-    if (!CONFIG.MESSAGE_RETENTION_DAYS) return;
-    const run = () => db.purgeOldMessageContent(CONFIG.MESSAGE_RETENTION_DAYS)
-        .then(count => { if (count > 0) logger.info(`Cleared message content from ${count} old ban record(s).`); })
-        .catch(err => logger.error('Failed to clear old message content.', err));
+    const run = () => {
+        if (CONFIG.MESSAGE_RETENTION_DAYS) {
+            db.purgeOldMessageContent(CONFIG.MESSAGE_RETENTION_DAYS)
+                .then(count => { if (count > 0) logger.info(`Cleared message content from ${count} old ban record(s).`); })
+                .catch(err => logger.error('Failed to clear old message content.', err));
+        }
+        db.purgeDecidedAppeals(DECIDED_RETENTION_DAYS)
+            .then(count => { if (count > 0) logger.info(`Deleted ${count} appeal(s) decided over ${DECIDED_RETENTION_DAYS} days ago.`); })
+            .catch(err => logger.error('Failed to delete old appeals.', err));
+    };
     run();
     setInterval(run, RETENTION_INTERVAL_MS).unref();
 }

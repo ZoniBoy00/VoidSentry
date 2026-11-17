@@ -9,7 +9,7 @@ Object.assign(process.env, {
   DB_HOST: '127.0.0.1',
   DB_PORT: '3306',
   DB_USER: 'voidsentry_test',
-  DB_PASSWORD: 'test-password',
+  DB_PASSWORD: 'mocked',
   DB_NAME: 'voidsentry_test',
   NODE_ENV: 'production',
 });
@@ -30,6 +30,7 @@ function makeInteraction(userId, userOption = TARGET) {
       user: { id: userId, tag: 'someone#0001' },
       inGuild: () => true,
       isButton: () => false,
+      isModalSubmit: () => false,
       isChatInputCommand: () => true,
       options: { getString: () => userOption },
       deferReply: async () => {},
@@ -41,7 +42,9 @@ function makeInteraction(userId, userOption = TARGET) {
 
 test('deletes the stored records and forgets the user in memory', async () => {
   let deletedFor;
+  let appealsFor;
   db.deleteBansByUser = async id => { deletedFor = id; return 3; };
+  db.deleteAppealsByUser = async id => { appealsFor = id; return 2; };
   stats.recordBan(TARGET, 'target#0001', '1');
   stats.recordBan('99999999999999999', 'other#0001', '1');
 
@@ -49,7 +52,8 @@ test('deletes the stored records and forgets the user in memory', async () => {
   await purgeUser.execute(interaction);
 
   assert.equal(deletedFor, TARGET);
-  assert.match(replies[0].content, /Deleted \*\*3\*\*/);
+  assert.equal(appealsFor, TARGET);
+  assert.match(replies[0].content, /Deleted \*\*3\*\* ban record\(s\) and \*\*2\*\* appeal\(s\)/);
   assert.equal(stats.recentBans.some(ban => ban.userId === TARGET), false);
   assert.equal(stats.recentBans.some(ban => ban.userId === '99999999999999999'), true);
 });
@@ -64,6 +68,7 @@ test('rejects an invalid user ID without touching the database', async () => {
 test('the router lets only the bot owner run /purge-user', async () => {
   let deleted = 0;
   db.deleteBansByUser = async () => { deleted += 1; return 1; };
+  db.deleteAppealsByUser = async () => 0;
   const commands = new Map([['purge-user', purgeUser]]);
   const client = { commands };
 

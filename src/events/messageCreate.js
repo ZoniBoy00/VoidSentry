@@ -110,15 +110,16 @@ function isExempt(member, exemptRoleIds) {
  * @param {import('discord.js').User} author - User to notify
  * @param {import('discord.js').Guild} guild - Guild they are being banned from
  * @param {string} reason - Ban reason
+ * @param {boolean} appealsEnabled - Whether the server accepts appeals
  */
-async function sendBanNotice(author, guild, reason) {
+async function sendBanNotice(author, guild, reason, appealsEnabled) {
     let timer;
     try {
         const timeout = new Promise((_, reject) => {
             timer = setTimeout(() => reject(new Error('DM timed out')), DM_TIMEOUT_MS);
         });
         await Promise.race([
-            author.send({ embeds: [createBanNotificationEmbed(guild.name, reason)] }),
+            author.send({ embeds: [createBanNotificationEmbed(guild.name, reason, { appealsEnabled })] }),
             timeout,
         ]);
         stats.recordDmSuccess();
@@ -205,7 +206,7 @@ module.exports = {
             } : null;
 
             // Notify before the ban: afterwards the user typically shares no server with the bot.
-            await sendBanNotice(author, guild, guildConfig.banReason);
+            await sendBanNotice(author, guild, guildConfig.banReason, guildConfig.appealsEnabled);
 
             // Execute ban with message purge
             await guild.members.ban(author, {

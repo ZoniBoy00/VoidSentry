@@ -8,14 +8,15 @@
  */
 
 const { EmbedBuilder } = require('discord.js');
-const { COLORS, LOGO_URL, BRAND_SECURITY } = require('../utils/constants');
+const { COLORS, LOGO_URL, BRAND_SECURITY, APPEALS_URL } = require('../utils/constants');
 
 /**
  * Creates the warning embed displayed in trap channels.
  * 
+ * @param {{appealsEnabled?: boolean}} [options] - Whether the server accepts appeals
  * @returns {import('discord.js').EmbedBuilder} Warning embed
  */
-function createWarningEmbed() {
+function createWarningEmbed({ appealsEnabled = false } = {}) {
     return new EmbedBuilder()
         .setColor(COLORS.DANGER)
         .setTitle('🚨 WARNING: BOT DETECTION CHANNEL 🚨')
@@ -24,7 +25,9 @@ function createWarningEmbed() {
             'This channel is monitored exclusively for bot detection.\n' +
             '**Do NOT type anything in this chat.**\n\n' +
             'If you send a message here, for any reason, you will be permanently banned.\n\n' +
-            'There are no appeals. No second chances.\n\n' +
+            (appealsEnabled
+                ? `If you were banned by mistake, you can appeal at ${APPEALS_URL}\n\n`
+                : 'There are no appeals. No second chances.\n\n') +
             'This is not a joke and not a test.\n' +
             '**You have been warned.**'
         )

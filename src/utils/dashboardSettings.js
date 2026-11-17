@@ -24,7 +24,11 @@ const MAX_EXEMPT_ROLES = 25;
 const SNOWFLAKE = /^\d{17,20}$/;
 
 const TEXT_CHANNEL_TYPES = [ChannelType.GuildText, ChannelType.GuildAnnouncement];
-const FIELDS = ['logChannelId', 'banReason', 'deleteMessageSeconds', 'dryRun', 'addTrapChannel', 'removeTrapChannel', 'addExemptRole', 'removeExemptRole'];
+const FIELDS = [
+    'logChannelId', 'banReason', 'deleteMessageSeconds', 'dryRun', 'addTrapChannel', 'removeTrapChannel', 'addExemptRole', 'removeExemptRole',
+    'appealsEnabled', 'appealCooldownDays', 'unblockAppellant',
+];
+const MAX_APPEAL_COOLDOWN_DAYS = 365;
 
 /** Text channels the bot may post in, for the pickers in the dashboard. */
 function listChannelOptions(guild) {
@@ -58,7 +62,7 @@ function canPostWarning(channel, me) {
 
 /** Default way to announce a new trap channel: post the warning, but do not clear the channel. */
 async function postTrapWarning(channel) {
-    await channel.send({ embeds: [createWarningEmbed()], files: [createLogoAttachment()] });
+    await channel.send({ embeds: [createWarningEmbed(guildSettings.getGuildConfig(channel.guild.id))], files: [createLogoAttachment()] });
 }
 
 /**
@@ -176,6 +180,28 @@ async function applySettings(guild, userId, body, { postWarning = postTrapWarnin
         const id = body.removeExemptRole;
         if (typeof id !== 'string' || !config.exemptRoleIds.includes(id)) return fail('That role is not exempt.');
         steps.push({ detail: `exempt role removed: ${guild.roles.cache.get(id)?.name ?? 'deleted role'} (${id})`, run: () => guildSettings.removeExemptRole(guild.id, id) });
+    }
+
+    if ('appealsEnabled' in body) {
+        if (typeof body.appealsEnabled !== 'boolean') return fail('Appeals must be on or off.');
+        steps.push({ detail: `appeals ${body.appealsEnabled ? 'turned on' : 'turned off'}`, run: () => guildSettings.setAppealsEnabled(guild.id, body.appealsEnabled) });
+    }
+
+    if ('appealCooldownDays' in body) {
+        const days = body.appealCooldownDays;
+        if (days !== null && (!Number.isInteger(days) || days < 0 || days > MAX_APPEAL_COOLDOWN_DAYS)) {
+            return fail(`The wait after a denied appeal must be between 0 and ${MAX_APPEAL_COOLDOWN_DAYS} days.`);
+        }
+        steps.push({
+            detail: days === null ? 'appeal wait reset to the default' : `appeal wait after a denial set to ${days} days`,
+            run: () => guildSettings.setAppealCooldownDays(guild.id, days),
+        });
+    }
+
+    if ('unblockAppellant' in body) {
+        const id = body.unblockAppellant;
+        if (typeof id !== 'string' || !SNOWFLAKE.test(id) || !await db.isAppealBlocked(guild.id, id)) return fail('That user is not blocked from appealing.');
+        steps.push({ detail: `user ${id} may appeal again`, run: () => db.removeAppealBlock(guild.id, id) });
     }
 
     const changes = [];

@@ -30,7 +30,9 @@ const BOT_OWNER = '12345678901234568';
 const searches = [];
 db.getBanCount = async () => 7;
 db.getUniqueUserCount = async () => 6;
+db.countOpenAppeals = async () => 2;
 const purged = [];
+db.deleteAppealsByUser = async () => 1;
 const saved = [];
 const audits = [];
 const unbanned = [];
@@ -154,7 +156,7 @@ test('an administrator gets settings, health and totals', async () => {
     assert.deepEqual(body.config.trapChannels, [{ id: '11111111111111119', name: 'do-not-post' }]);
     assert.deepEqual(body.config.exemptRoles, [{ id: '99999999999999999', name: 'Staff' }]);
     assert.deepEqual(body.health, { canBan: true, hasLogChannel: true, hasTrapChannel: true, trapWarningBlocked: [] });
-    assert.deepEqual(body.totals, { bans: 7, uniqueUsers: 6 });
+    assert.deepEqual(body.totals, { bans: 7, uniqueUsers: 6, openAppeals: 2 });
   });
 });
 
@@ -265,11 +267,73 @@ test('the owner can delete a user from all ban records, and bad IDs are refused'
     const ok = await request(server, '/api/admin/purge-user', { user: BOT_OWNER, method: 'POST', body: { userId: '77777777777777777' } });
     assert.equal(ok.status, 200);
     assert.equal(ok.body.deleted, 3);
+    assert.equal(ok.body.deletedAppeals, 1);
     assert.deepEqual(purged, ['77777777777777777']);
 
     const bad = await request(server, '/api/admin/purge-user', { user: BOT_OWNER, method: 'POST', body: { userId: 'nope' } });
     assert.equal(bad.status, 400);
     assert.equal(purged.length, 1);
+  });
+});
+
+test('a banned person sees only their own appeals, whatever they send', async () => {
+  const appeals = require('../src/utils/appeals');
+  const asked = [];
+  appeals.listForAppellant = async (_client, userId) => { asked.push(userId); return [{ guildId: GUILD, state: 'can-appeal' }]; };
+  await withServer({ token: TOKEN }, async server => {
+    const { status, body } = await request(server, '/api/appeals?user=55555555555555555', { user: MEMBER });
+    assert.equal(status, 200);
+    assert.deepEqual(body.servers, [{ guildId: GUILD, state: 'can-appeal' }]);
+    assert.deepEqual(asked, [MEMBER]);
+  });
+});
+
+test('filing an appeal acts for the header user and has its own rate limit', async () => {
+  const appeals = require('../src/utils/appeals');
+  const filed = [];
+  appeals.submitAppeal = async (_client, request) => { filed.push(request); return { ok: true, appeal: { id: filed.length } }; };
+  await withServer({ token: TOKEN }, async server => {
+    const bad = await request(server, '/api/appeals', { user: MEMBER, method: 'POST', body: { guildId: 'x', text: 'please' } });
+    assert.equal(bad.status, 422);
+    assert.equal(filed.length, 0);
+
+    const ok = await request(server, '/api/appeals', { user: MEMBER, method: 'POST', body: { guildId: GUILD, text: 'It was my cat.', userId: ADMIN } });
+    assert.equal(ok.status, 200);
+    assert.equal(filed[0].userId, MEMBER);
+    assert.equal(filed[0].guildId, GUILD);
+    assert.equal(filed[0].text, 'It was my cat.');
+
+    const statuses = [];
+    for (let i = 0; i < 5; i += 1) {
+      statuses.push((await request(server, '/api/appeals', { user: MEMBER, method: 'POST', body: { guildId: GUILD, text: 'again and again' } })).status);
+    }
+    assert.deepEqual(statuses, [200, 200, 200, 200, 429]);
+  });
+});
+
+test('only people who may manage the server can list and decide its appeals', async () => {
+  const appeals = require('../src/utils/appeals');
+  const decided = [];
+  appeals.decideAppealFor = async (guild, request) => { decided.push({ guildId: guild.id, ...request }); return { ok: true, status: 'denied' }; };
+  db.getGuildAppeals = async (_guildId, which) => (which === 'open'
+    ? [{ id: 4, guild_id: GUILD, user_id: '77777777777777777', user_tag: 'spammer', text: 'sorry', status: 'open', created_at: new Date('2026-11-01T00:00:00Z') }]
+    : []);
+  db.getAppealBlocks = async () => [];
+  db.findBansByUserId = async () => [{ id: 9, user_id: '77777777777777777', user_tag: 'spammer', channel_name: 'trap', message_content: 'free nitro', reason: 'Trap', created_at: new Date('2026-10-31T00:00:00Z') }];
+
+  await withServer({ token: TOKEN }, async server => {
+    assert.equal((await request(server, `/api/guilds/${GUILD}/appeals`, { user: MEMBER })).status, 404);
+    assert.equal((await request(server, `/api/guilds/${GUILD}/appeals`, { user: MEMBER, method: 'POST', body: { appealId: 4, decision: 'deny' } })).status, 404);
+    assert.equal(decided.length, 0);
+
+    const list = await request(server, `/api/guilds/${GUILD}/appeals`);
+    assert.equal(list.status, 200);
+    assert.equal(list.body.open[0].id, 4);
+    assert.equal(list.body.open[0].ban.messageContent, 'free nitro');
+
+    const ok = await request(server, `/api/guilds/${GUILD}/appeals`, { method: 'POST', body: { appealId: 4, decision: 'deny', reply: 'No.', block: true } });
+    assert.equal(ok.status, 200);
+    assert.deepEqual(decided[0], { guildId: GUILD, appealId: 4, deciderId: ADMIN, decision: 'deny', reply: 'No.', block: true });
   });
 });
 
