@@ -15,6 +15,7 @@ const { createWarningEmbed } = require('../embeds/warningEmbed');
 const { createLogoAttachment } = require('./helpers');
 const db = require('./db');
 const guildSettings = require('./guildSettings');
+const banProblems = require('./banProblems');
 const logger = require('./logger');
 
 const MAX_REASON_LENGTH = 500;
@@ -26,8 +27,10 @@ const SNOWFLAKE = /^\d{17,20}$/;
 const TEXT_CHANNEL_TYPES = [ChannelType.GuildText, ChannelType.GuildAnnouncement];
 const FIELDS = [
     'logChannelId', 'banReason', 'deleteMessageSeconds', 'dryRun', 'addTrapChannel', 'removeTrapChannel', 'addExemptRole', 'removeExemptRole',
-    'appealsEnabled', 'appealCooldownDays', 'unblockAppellant',
+    'appealsEnabled', 'appealCooldownDays', 'unblockAppellant', 'repostWarning', 'dismissBanProblems',
 ];
+/** Actions that are not settings: each is sent on its own and acted on straight away. */
+const ACTIONS = ['repostWarning', 'dismissBanProblems'];
 const MAX_APPEAL_COOLDOWN_DAYS = 365;
 
 /** Text channels the bot may post in, for the pickers in the dashboard. */
@@ -84,6 +87,30 @@ async function applySettings(guild, userId, body, { postWarning = postTrapWarnin
     const config = guildSettings.getGuildConfig(guild.id);
     const traps = guildSettings.listTrapChannels(guild.id);
     const me = guild.members.me;
+
+    if (keys.some(key => ACTIONS.includes(key))) {
+        if (keys.length > 1) return { ok: false, error: 'Send that action on its own.' };
+        if ('dismissBanProblems' in body) {
+            if (body.dismissBanProblems !== true) return { ok: false, error: 'Nothing to change.' };
+            banProblems.clearProblems(guild.id);
+            return { ok: true, changes: ['failed bans dismissed'] };
+        }
+        // Repost the warning, for example after appeals were turned on or the bot got the permissions it lacked.
+        const channel = typeof body.repostWarning === 'string' ? guild.channels.cache.get(body.repostWarning) : null;
+        if (!channel || !traps.includes(channel.id)) return { ok: false, error: 'Choose one of the trap channels.' };
+        if (!canPostWarning(channel, me)) {
+            return { ok: false, error: `VoidSentry needs the View Channel, Send Messages, Embed Links and Attach Files permissions in #${channel.name}.` };
+        }
+        try {
+            await postWarning(channel);
+        } catch (error) {
+            logger.warn(`Could not repost the trap warning in ${channel.id}: ${error?.message || error}`);
+            return { ok: false, error: `The warning could not be posted in #${channel.name}. Try again in a minute.` };
+        }
+        const detail = `trap warning posted again in #${channel.name} (${channel.id})`;
+        await db.addAudit({ guildId: guild.id, userId, detail }).catch(error => logger.error('Could not write the audit log entry.', error));
+        return { ok: true, changes: [detail] };
+    }
 
     const textChannel = id => {
         const channel = typeof id === 'string' && SNOWFLAKE.test(id) ? guild.channels.cache.get(id) : null;

@@ -155,7 +155,7 @@ test('an administrator gets settings, health and totals', async () => {
     assert.deepEqual(body.config.logChannel, { id: '88888888888888888', name: 'mod-logs' });
     assert.deepEqual(body.config.trapChannels, [{ id: '11111111111111119', name: 'do-not-post' }]);
     assert.deepEqual(body.config.exemptRoles, [{ id: '99999999999999999', name: 'Staff' }]);
-    assert.deepEqual(body.health, { canBan: true, hasLogChannel: true, hasTrapChannel: true, trapWarningBlocked: [] });
+    assert.deepEqual(body.health, { canBan: true, hasLogChannel: true, hasTrapChannel: true, trapWarningBlocked: [], banProblems: [] });
     assert.deepEqual(body.totals, { bans: 7, uniqueUsers: 6, openAppeals: 2 });
   });
 });

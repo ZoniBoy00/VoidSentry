@@ -7,11 +7,11 @@ A high-performance Discord security bot designed to catch and remove self-bots a
 ## 🚀 Features
 
 - **Multi-Server Support** — One bot instance serves any number of servers. Each server has its own trap channels, log channel, ban reason and purge duration, managed with slash commands (no restart needed).
-- **Instant Detection** — Real-time monitoring of multiple restricted channels.
+- **Instant Detection** — Real-time monitoring of multiple restricted channels. Threads inside a trap channel count as the trap channel, and editing a message there counts like writing one (Discord only reports edits of messages sent while the bot was running; link previews loading or pins do not count). Forum channels cannot be traps.
 - **Auto-Ban** — Immediately bans violators with zero tolerance.
 - **Message Purge** — Deletes the banned user's recent messages across the server (24h by default, configurable per server).
 - **DM Notification** — Sends a notification to the user *before* banning (best-effort, 3 s timeout, fails silently if DMs are disabled).
-- **Safety Net** — Administrators and configurable exempt roles are never banned (their trap message is only deleted). A per-server dry-run mode reports violations without banning, and failed bans (missing permission, role hierarchy) are reported to the log channel.
+- **Safety Net** — Administrators and configurable exempt roles are never banned (their trap message is only deleted). A per-server dry-run mode reports violations without banning, and failed bans (missing permission, role hierarchy) are reported to the log channel and, for 7 days or until dismissed, on the dashboard (kept in memory, so a restart clears them).
 - **Privacy** — Captured message content is cleared from the ban history after `MESSAGE_RETENTION_DAYS` (default 90).
 - **MySQL Database** — Persistent ban history storage with search and statistics.
 - **Detailed Ban Logs** — Rich embed logs with:
@@ -23,11 +23,12 @@ A high-performance Discord security bot designed to catch and remove self-bots a
   - Suspicious account age warning (< 7 days old)
 - **Slash Commands**:
   - `/help` — List all commands (built from the loaded commands, always up to date)
-  - `/setup-trap` — Register the current channel as a trap for this server and post the warning
+  - `/setup-trap [create]` — Register the current channel as a trap for this server and post the warning, or create a new channel for it (needs Manage Channels)
   - `/trap-settings` — View or change this server's trap channels, log channel, ban reason, purge duration, dry-run mode and exempt roles
   - `/add-logchannel [channel]` — Choose where ban logs are posted on this server (any channel, any name)
   - `/remove-logchannel` — Stop posting ban logs
   - `/unban` — Unban a user by ID (ban history is kept)
+  - `/unban-recent <window>` — Lift the bans VoidSentry made in the last hour, 6 hours, day or 3 days (at most 25 per run, after a confirmation button)
   - `/purge-user` — Bot owner only: delete all stored ban records and appeals of a user (data deletion requests)
   - `/status` — View bot uptime, statistics, and recent bans
   - `/ban-info` — Look up ban information for a user by ID (Discord ban lookup)
@@ -64,6 +65,7 @@ VoidSentry/
 │   │   ├── addLogChannel.js        # /add-logchannel
 │   │   ├── removeLogChannel.js     # /remove-logchannel
 │   │   ├── unban.js                # /unban
+│   │   ├── unbanRecent.js          # /unban-recent
 │   │   ├── purgeUser.js            # /purge-user (bot owner only)
 │   │   ├── status.js              # /status
 │   │   ├── banInfo.js             # /ban-info (Discord ban lookup)
@@ -77,7 +79,8 @@ VoidSentry/
 │   │   ├── interactionCreate.js   # Slash command router
 │   │   ├── guildDelete.js         # Cleans up when the bot leaves a server
 │   │   ├── channelDelete.js       # Unregisters deleted trap channels
-│   │   └── messageCreate.js       # Core trap detection & ban logic
+│   │   ├── messageCreate.js       # Core trap detection & ban logic
+│   │   └── messageUpdate.js       # Edited messages go through the same logic
 │   └── utils/
 │       ├── db.js                   # MySQL queries
 │       ├── migrations.js          # Versioned schema migrations
@@ -86,6 +89,7 @@ VoidSentry/
 │       ├── audit.js               # Change log entries for commands and buttons
 │       ├── unbanButton.js         # Unban button on ban logs
 │       ├── ownerAlerts.js         # Daily DM to a server owner when bans fail
+│       ├── banProblems.js         # Recent failed bans for the dashboard (in memory)
 │       ├── messageEvidence.js     # Summary of the message that triggered a ban
 │       ├── helpers.js             # Utility functions
 │       ├── logger.js              # Pino structured logger
@@ -194,7 +198,7 @@ and the configured user only needs access to that database.
 | Command | Description | Permissions |
 | :--- | :--- | :--- |
 | `/help` | List all commands | Everyone |
-| `/setup-trap` | Registers the channel as a trap, clears it and posts the warning | Owner / Administrator |
+| `/setup-trap [create]` | Registers the channel as a trap, clears it and posts the warning; with `create`, makes a new channel with that name instead (needs Manage Channels, which the default invite does not include) | Owner / Administrator |
 | `/trap-settings view` | Show this server's trap channels and settings | Owner / Administrator |
 | `/trap-settings remove-trap [channel]` | Stop treating a channel as a trap | Owner / Administrator |
 | `/add-logchannel [channel]` | Set the ban log channel (checks bot permissions, posts a confirmation) | Owner / Administrator |
@@ -206,6 +210,7 @@ and the configured user only needs access to that database.
 | `/trap-settings exempt-add <role>` | Never ban members with this role | Owner / Administrator |
 | `/trap-settings exempt-remove <role>` | Remove a role exemption | Owner / Administrator |
 | `/unban <user_id>` | Unban a user on this server | Owner / Administrator |
+| `/unban-recent <window>` | Lift the bans VoidSentry made here in a recent window, after a confirmation; one change log entry | Owner / Administrator |
 | `/purge-user <user_id>` | Delete all stored ban records and appeals of a user on every server | Bot owner only |
 | `/status` | Bot uptime, stats, ping, recent bans | Owner / Administrator |
 | `/ban-info` | Look up Discord ban by user ID | Owner / Administrator |

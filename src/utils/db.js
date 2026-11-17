@@ -204,6 +204,26 @@ async function getBanActivity(guildId, days = 30, limit = 50000) {
 }
 
 /**
+ * Users VoidSentry banned on a server in the last N hours, newest first, one
+ * row per user (their newest ban).
+ *
+ * @param {string} guildId - Server
+ * @param {number} hours - Window size in hours
+ * @param {number} limit - Most users to return
+ * @returns {Promise<{user_id: string, user_tag: string, created_at: Date}[]>}
+ */
+async function getRecentBannedUsers(guildId, hours, limit) {
+    const db = await getPool();
+    const [rows] = await db.query(
+        `SELECT user_id, MAX(user_tag) AS user_tag, MAX(created_at) AS created_at FROM bans
+         WHERE guild_id = ? AND created_at >= (NOW() - INTERVAL ? HOUR)
+         GROUP BY user_id ORDER BY created_at DESC LIMIT ?`,
+        [guildId, hours, limit]
+    );
+    return rows;
+}
+
+/**
  * Number of stored bans per server.
  *
  * @returns {Promise<Map<string, number>>} Server ID to ban count
@@ -654,6 +674,7 @@ module.exports = {
     getBans,
     searchBans,
     getBanActivity,
+    getRecentBannedUsers,
     getBanCountsByGuild,
     getBanCount,
     getBanCountSince,

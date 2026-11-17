@@ -10,7 +10,7 @@ const testEnv = {
   DB_HOST: '127.0.0.1',
   DB_PORT: '3306',
   DB_USER: 'voidsentry_test',
-  DB_PASSWORD: 'test-password',
+  DB_PASSWORD: 'mocked',
   DB_NAME: 'voidsentry_test',
   DELETE_MESSAGE_SECONDS: '86400',
   NODE_ENV: 'production',
@@ -158,4 +158,50 @@ test('dry-run reports but does not ban', async () => {
   assert.equal(actions.some(action => action.type === 'dm'), false);
   assert.equal(actions.some(action => action.type === 'delete'), false);
   assert.equal(storedBans, storedBansBefore);
+});
+
+test('a thread inside a trap channel counts as the trap channel', async () => {
+  const { message, actions } = makeMessage();
+  message.channel = {
+    id: '77777777777777777',
+    name: 'a-thread',
+    isThread: () => true,
+    parentId: process.env.BAN_CHANNEL_IDS,
+    parent: { id: process.env.BAN_CHANNEL_IDS, name: 'trap-channel' },
+  };
+  await handler.execute({}, message);
+  assert.equal(actions.some(action => action.type === 'ban'), true);
+});
+
+test('a thread in another channel is ignored', async () => {
+  const { message, actions } = makeMessage();
+  message.channel = { id: '77777777777777778', name: 'a-thread', isThread: () => true, parentId: '88888888888888888', parent: null };
+  await handler.execute({}, message);
+  assert.equal(actions.length, 0);
+});
+
+test('a failed ban is kept for the dashboard', async () => {
+  const banProblems = require('../src/utils/banProblems');
+  banProblems.clearProblems('12345678901234567');
+  const { message } = makeMessage({ bannable: false });
+  await handler.execute({}, message);
+  const [problem] = banProblems.getProblems('12345678901234567');
+  assert.equal(problem.kind, 'hierarchy');
+  assert.equal(problem.userId, message.author.id);
+});
+
+test('an edit by the author goes through the trap; previews and pins do not', async () => {
+  const update = require('../src/events/messageUpdate');
+  const { message, actions } = makeMessage();
+  message.editedTimestamp = null;
+  await update.execute({}, { editedTimestamp: null }, message);
+  assert.equal(actions.length, 0, 'a link preview loading is not an edit');
+
+  message.editedTimestamp = 1000;
+  await update.execute({}, { editedTimestamp: 1000 }, message);
+  assert.equal(actions.length, 0, 'a pin keeps the same edit time');
+
+  message.editedTimestamp = 2000;
+  await update.execute({}, { editedTimestamp: 1000 }, message);
+  assert.equal(actions.some(action => action.type === 'ban'), true);
 });

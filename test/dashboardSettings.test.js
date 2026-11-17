@@ -10,7 +10,7 @@ Object.assign(process.env, {
   DB_HOST: '127.0.0.1',
   DB_PORT: '3306',
   DB_USER: 'voidsentry_test',
-  DB_PASSWORD: 'test-password',
+  DB_PASSWORD: 'mocked',
   DB_NAME: 'voidsentry_test',
   NODE_ENV: 'production',
 });
@@ -199,4 +199,31 @@ test('a failing audit log never hides a change that was saved', async () => {
   const result = await apply({ dryRun: true });
   assert.equal(result.ok, true);
   assert.deepEqual(calls, [['setDryRun', GUILD, true]]);
+});
+
+test('posts the trap warning again in a trap channel, on its own', async () => {
+  reset();
+  const posted = [];
+  const postWarning = async target => { posted.push(target.id); };
+  assert.equal((await apply({ repostWarning: NEW_TRAP }, { postWarning })).ok, false, 'only trap channels');
+  assert.equal((await apply({ repostWarning: TRAP, dryRun: true }, { postWarning })).ok, false, 'not mixed with settings');
+  const result = await apply({ repostWarning: TRAP }, { postWarning });
+  assert.equal(result.ok, true);
+  assert.deepEqual(posted, [TRAP]);
+  assert.match(audits[0].detail, /trap warning posted again in #do-not-post/);
+});
+
+test('reports a repost that Discord refused, and records nothing', async () => {
+  reset();
+  const result = await apply({ repostWarning: TRAP }, { postWarning: async () => { throw new Error('Missing Access'); } });
+  assert.equal(result.ok, false);
+  assert.deepEqual(audits, []);
+});
+
+test('dismisses the failed bans shown on the dashboard', async () => {
+  reset();
+  const banProblems = require('../src/utils/banProblems');
+  banProblems.recordProblem(GUILD, { kind: 'hierarchy', userId: USER, userTag: 'x', channelId: TRAP });
+  assert.equal((await apply({ dismissBanProblems: true })).ok, true);
+  assert.deepEqual(banProblems.getProblems(GUILD), []);
 });

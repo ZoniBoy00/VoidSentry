@@ -18,8 +18,9 @@ const UNKNOWN_BAN = 10026;
  *
  * @param {import('discord.js').Guild} guild - Server to unban in
  * @param {string} userId - Banned user
- * @param {{actorId: string, reason: string, detail: string}} options -
+ * @param {{actorId: string, reason: string, detail: string|null}} options -
  *   Who lifted it, the reason shown in Discord's audit log and the entry for the change log
+ *   (null when the caller writes one entry for several unbans itself)
  * @returns {Promise<'unbanned'|'not-banned'>} 'not-banned' when someone already lifted it (nothing is recorded then)
  * @throws When Discord refuses for another reason, such as a missing Ban Members permission
  */
@@ -30,7 +31,7 @@ async function liftBan(guild, userId, { actorId, reason, detail }) {
         if (error?.code === UNKNOWN_BAN) return 'not-banned';
         throw error;
     }
-    await recordAudit(guild.id, actorId, detail);
+    if (detail) await recordAudit(guild.id, actorId, detail);
     return 'unbanned';
 }
 

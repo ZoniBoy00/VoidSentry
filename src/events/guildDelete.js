@@ -11,6 +11,7 @@ const { Events } = require('discord.js');
 
 const logger = require('../utils/logger');
 const guildSettings = require('../utils/guildSettings');
+const { clearProblems } = require('../utils/banProblems');
 
 module.exports = {
     /** Event name for Discord.js */
@@ -25,6 +26,7 @@ module.exports = {
         // An unavailable guild is a Discord outage, not a removal.
         if (guild.available === false) return;
         try {
+            clearProblems(guild.id);
             await guildSettings.removeGuild(guild.id);
             logger.info(`Left guild ${guild.name ?? guild.id}; its trap settings were removed.`);
         } catch (error) {

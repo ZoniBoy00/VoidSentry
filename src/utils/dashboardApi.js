@@ -44,6 +44,7 @@ const { summarizeBans } = require('./banStats');
 const db = require('./db');
 const guildSettings = require('./guildSettings');
 const appeals = require('./appeals');
+const banProblems = require('./banProblems');
 const { applySettings, canPostWarning, listChannelOptions, listRoleOptions } = require('./dashboardSettings');
 const logger = require('./logger');
 const { createRateLimiter } = require('./rateLimit');
@@ -177,6 +178,11 @@ async function describeGuild(guild) {
                 .map(id => guild.channels.cache.get(id))
                 .filter(channel => channel && !canPostWarning(channel, me))
                 .map(channel => ({ id: channel.id, name: channel.name })),
+            // Bans that failed recently (since the bot started, at most 7 days back).
+            banProblems: banProblems.getProblems(guild.id).map(problem => ({
+                ...problem,
+                channelName: guild.channels.cache.get(problem.channelId)?.name ?? null,
+            })),
         },
         totals: { bans: Number(bans), uniqueUsers: Number(uniqueUsers), openAppeals: Number(openAppeals) },
         options: { channels: listChannelOptions(guild), roles: listRoleOptions(guild) },
