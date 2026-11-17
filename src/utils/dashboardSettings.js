@@ -42,6 +42,20 @@ function listRoleOptions(guild) {
         .map(role => ({ id: role.id, name: role.name }));
 }
 
+/**
+ * Whether the bot can post the trap warning in a channel. The warning is an embed
+ * with the logo attached; without these permissions Discord rejects the message.
+ *
+ * @param {import('discord.js').GuildChannel} channel - Trap channel
+ * @param {import('discord.js').GuildMember|null|undefined} me - The bot's member in the server
+ * @returns {boolean}
+ */
+function canPostWarning(channel, me) {
+    return Boolean(channel.permissionsFor?.(me)?.has([
+        PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.AttachFiles,
+    ]));
+}
+
 /** Default way to announce a new trap channel: post the warning, but do not clear the channel. */
 async function postTrapWarning(channel) {
     await channel.send({ embeds: [createWarningEmbed()], files: [createLogoAttachment()] });
@@ -73,9 +87,6 @@ async function applySettings(guild, userId, body, { postWarning = postTrapWarnin
     };
     const canPost = channel =>
         Boolean(channel.permissionsFor?.(me)?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages]));
-    // The warning is an embed with the logo attached; without these Discord rejects the message.
-    const canPostWarning = channel =>
-        Boolean(channel.permissionsFor?.(me)?.has([PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.AttachFiles]));
     const warnings = [];
 
     /** Steps to run once everything has been validated. */
@@ -134,7 +145,7 @@ async function applySettings(guild, userId, body, { postWarning = postTrapWarnin
             run: async () => {
                 await guildSettings.addTrapChannel(guild.id, channel.id);
                 // The channel is a trap from now on; the warning is a courtesy and must not undo that.
-                if (!canPostWarning(channel)) {
+                if (!canPostWarning(channel, me)) {
                     warnings.push(`The warning message was not posted in #${channel.name}: VoidSentry needs the Embed Links and Attach Files permissions there.`);
                     return;
                 }
@@ -179,4 +190,4 @@ async function applySettings(guild, userId, body, { postWarning = postTrapWarnin
     return warnings.length ? { ok: true, changes, warnings } : { ok: true, changes };
 }
 
-module.exports = { applySettings, listChannelOptions, listRoleOptions, MAX_REASON_LENGTH, MAX_PURGE_SECONDS };
+module.exports = { applySettings, canPostWarning, listChannelOptions, listRoleOptions, MAX_REASON_LENGTH, MAX_PURGE_SECONDS };

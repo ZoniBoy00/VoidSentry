@@ -10,7 +10,7 @@ Object.assign(process.env, {
   DB_HOST: '127.0.0.1',
   DB_PORT: '3306',
   DB_USER: 'voidsentry_test',
-  DB_PASSWORD: 'test-password',
+  DB_PASSWORD: 'mocked',
   DB_NAME: 'voidsentry_test',
   NODE_ENV: 'production',
 });
@@ -53,7 +53,7 @@ guildSettings.getGuildConfig = () => ({
 });
 guildSettings.listTrapChannels = () => ['11111111111111119'];
 
-function makeGuild(id, name, { canBan = true } = {}) {
+function makeGuild(id, name, { canBan = true, canPostWarning = true } = {}) {
   const members = new Map([
     [ADMIN, { permissions: { has: () => true } }],
     [MEMBER, { permissions: { has: () => false } }],
@@ -78,12 +78,17 @@ function makeGuild(id, name, { canBan = true } = {}) {
         return member;
       },
     },
-    channels: { cache: new Map([['88888888888888888', { name: 'mod-logs' }], ['11111111111111119', { name: 'do-not-post' }]]) },
+    channels: {
+      cache: new Map([
+        ['88888888888888888', { id: '88888888888888888', name: 'mod-logs' }],
+        ['11111111111111119', { id: '11111111111111119', name: 'do-not-post', permissionsFor: () => ({ has: () => canPostWarning }) }],
+      ]),
+    },
     roles: { cache: new Map([['99999999999999999', { name: 'Staff' }]]) },
   };
 }
 
-const guilds = new Map([[GUILD, makeGuild(GUILD, 'Main server')], [OTHER_GUILD, makeGuild(OTHER_GUILD, 'Other', { canBan: false })]]);
+const guilds = new Map([[GUILD, makeGuild(GUILD, 'Main server')], [OTHER_GUILD, makeGuild(OTHER_GUILD, 'Other', { canBan: false, canPostWarning: false })]]);
 const client = {
   guilds: { cache: guilds },
   users: {
@@ -148,7 +153,7 @@ test('an administrator gets settings, health and totals', async () => {
     assert.deepEqual(body.config.logChannel, { id: '88888888888888888', name: 'mod-logs' });
     assert.deepEqual(body.config.trapChannels, [{ id: '11111111111111119', name: 'do-not-post' }]);
     assert.deepEqual(body.config.exemptRoles, [{ id: '99999999999999999', name: 'Staff' }]);
-    assert.deepEqual(body.health, { canBan: true, hasLogChannel: true, hasTrapChannel: true });
+    assert.deepEqual(body.health, { canBan: true, hasLogChannel: true, hasTrapChannel: true, trapWarningBlocked: [] });
     assert.deepEqual(body.totals, { bans: 7, uniqueUsers: 6 });
   });
 });
@@ -157,6 +162,13 @@ test('health reports a missing Ban Members permission', async () => {
   await withServer({ token: TOKEN }, async server => {
     const { body } = await request(server, `/api/guilds/${OTHER_GUILD}`);
     assert.equal(body.health.canBan, false);
+  });
+});
+
+test('health lists trap channels where the warning cannot be posted', async () => {
+  await withServer({ token: TOKEN }, async server => {
+    const { body } = await request(server, `/api/guilds/${OTHER_GUILD}`);
+    assert.deepEqual(body.health.trapWarningBlocked, [{ id: '11111111111111119', name: 'do-not-post' }]);
   });
 });
 

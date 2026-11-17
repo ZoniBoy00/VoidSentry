@@ -114,7 +114,7 @@ VoidSentry/
 
 ## 🛠️ Installation
 
-1. **Requirement**: [Node.js](https://nodejs.org/) v20 or higher (CI and the Docker image use Node 20).
+1. **Requirement**: [Node.js](https://nodejs.org/) v22 or higher (CI and the Docker image use Node 24, the current LTS; Node 20 no longer gets security fixes).
 2. **Database**: Set up a MySQL database (see configuration below).
 3. **Download**: Clone or download this repository.
 4. **Install Dependencies**:
@@ -138,6 +138,7 @@ Copy `.env.example` to `.env` and fill in your credentials:
 | `STATUS_TEXT` | First line of the rotating bot status (default: `Watching for breaches...`). Server and ban counts are added automatically. |
 | `DELETE_MESSAGE_SECONDS` | Default messages to delete on ban (default: 86400 = 24h). Servers can override it. |
 | `BAN_REASON` | Default ban reason. Servers can override it. |
+| `SUPPORT_URL` | Optional. Support link shown by `/help` (default: this repository's [GitHub Discussions](https://github.com/ZoniBoy00/VoidSentry/discussions)). |
 | `STATS_PORT` | Optional. Port of a read-only JSON endpoint (`GET /stats`) with aggregate numbers (servers, members, total bans, bans in the last 7 days) for the website. `0` or empty = disabled. |
 | `STATS_HOST` | Interface for the stats endpoint (default `127.0.0.1`). Keep it on localhost and expose it through a tunnel or reverse proxy. |
 | `STATS_TOKEN` | Optional bearer token the stats endpoint requires. Use a random value of at least 32 characters (for example `openssl rand -hex 32`); the bot logs a warning at start-up if it is shorter. |

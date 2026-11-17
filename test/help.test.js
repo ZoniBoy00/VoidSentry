@@ -11,7 +11,7 @@ Object.assign(process.env, {
   DB_HOST: '127.0.0.1',
   DB_PORT: '3306',
   DB_USER: 'voidsentry_test',
-  DB_PASSWORD: 'test-password',
+  DB_PASSWORD: 'mocked',
   DB_NAME: 'voidsentry_test',
   NODE_ENV: 'production',
 });
@@ -49,6 +49,7 @@ test('/help lists every loaded command and marks admin commands', async () => {
   assert.ok(!fields.find(f => f.name.startsWith('/help')).name.includes('🔒'));
   assert.ok(fields.every(f => f.value.length <= 1024));
   assert.deepEqual(payload.flags, [64]);
+  assert.match(payload.embeds[0].data.description, /Need help\?\*\* Ask at https:\/\/github\.com\/ZoniBoy00\/VoidSentry\/discussions/);
 });
 
 test('presence shows server count and, once known, the ban total', async () => {

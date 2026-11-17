@@ -1,0 +1,24 @@
+# Version updates. Security updates for vulnerable dependencies are switched on in the repository settings.
+version: 2
+updates:
+  - package-ecosystem: npm # Covers yarn.lock too.
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Minor and patch updates arrive as one pull request; major updates stay separate so they get a proper look.
+      minor-and-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      # Stay on an LTS line; move to the next one by hand.
+      - dependency-name: node
+        update-types: [version-update:semver-major]

@@ -30,6 +30,9 @@ const BRAND_NAME = 'VoidSentry';
 const BRAND_SECURITY = `${BRAND_NAME} Security`;
 const BRAND_LOGGING = `${BRAND_NAME} Logging`;
 
+/** Where people ask for help. Self-hosted copies can point it at their own place with SUPPORT_URL. */
+const SUPPORT_URL = process.env.SUPPORT_URL?.trim() || 'https://github.com/ZoniBoy00/VoidSentry/discussions';
+
 /**
  * Get ban reason from config.
  * Loaded dynamically from environment at runtime.
@@ -50,6 +53,7 @@ module.exports = {
     BRAND_NAME,
     BRAND_SECURITY,
     BRAND_LOGGING,
+    SUPPORT_URL,
     VERSION,
     getBanReason,
 };

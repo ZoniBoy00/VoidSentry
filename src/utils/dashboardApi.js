@@ -39,7 +39,7 @@ const CONFIG = require('../config');
 const { summarizeBans } = require('./banStats');
 const db = require('./db');
 const guildSettings = require('./guildSettings');
-const { applySettings, listChannelOptions, listRoleOptions } = require('./dashboardSettings');
+const { applySettings, canPostWarning, listChannelOptions, listRoleOptions } = require('./dashboardSettings');
 const logger = require('./logger');
 const { createRateLimiter } = require('./rateLimit');
 const sessionRevocations = require('./sessionRevocations');
@@ -122,6 +122,7 @@ async function describeGuild(guild) {
     const config = guildSettings.getGuildConfig(guild.id);
     const trapChannelIds = guildSettings.listTrapChannels(guild.id);
     const [bans, uniqueUsers] = await Promise.all([db.getBanCount(guild.id), db.getUniqueUserCount(guild.id)]);
+    const me = guild.members.me;
 
     return {
         guild: {
@@ -139,9 +140,14 @@ async function describeGuild(guild) {
             exemptRoles: config.exemptRoleIds.map(id => named(guild.roles.cache, id)),
         },
         health: {
-            canBan: Boolean(guild.members.me?.permissions?.has(PermissionFlagsBits.BanMembers)),
+            canBan: Boolean(me?.permissions?.has(PermissionFlagsBits.BanMembers)),
             hasLogChannel: Boolean(config.logChannelId),
             hasTrapChannel: trapChannelIds.length > 0,
+            // Trap channels where the warning message cannot be posted (deleted channels are left out).
+            trapWarningBlocked: trapChannelIds
+                .map(id => guild.channels.cache.get(id))
+                .filter(channel => channel && !canPostWarning(channel, me))
+                .map(channel => ({ id: channel.id, name: channel.name })),
         },
         totals: { bans: Number(bans), uniqueUsers: Number(uniqueUsers) },
         options: { channels: listChannelOptions(guild), roles: listRoleOptions(guild) },
