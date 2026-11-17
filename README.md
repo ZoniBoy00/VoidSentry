@@ -332,6 +332,17 @@ gunzip -c backups/voidsentry-YYYYMMDD-HHMMSS.sql.gz | mysql -h HOST -u USER -p D
 
 The decrypt step refuses a wrong key or a changed file and leaves no partial output. Do one test restore after turning encryption on.
 
+## Tests
+
+`npm test` runs the unit tests. They mock Discord and the database, so they need nothing else.
+
+`test/db.integration.test.js` runs every migration and every query in `src/utils/db.js` against a real MySQL or MariaDB server. It is skipped unless `TEST_DB_HOST` is set, and CI runs it against MySQL 8.4 and MariaDB 11.4. To run it yourself, point it at an **empty, throwaway** database (it drops every table in it first):
+
+```
+docker run -d --name vs-test-db -e MARIADB_ROOT_PASSWORD=test -e MARIADB_DATABASE=voidsentry_test -p 3307:3306 mariadb:11.4
+TEST_DB_HOST=127.0.0.1 TEST_DB_PORT=3307 TEST_DB_USER=root TEST_DB_PASSWORD=test TEST_DB_NAME=voidsentry_test node --test test/db.integration.test.js
+```
+
 ## Dashboard API
 
 When `STATS_PORT` and `STATS_TOKEN` are set (and `DASHBOARD_API` is not `false`), the stats server also serves the API behind the website dashboard under `/api/` (see `src/utils/dashboardApi.js` for the routes, including settings, unban, CSV export and statistics, and the owner-only routes for server trends, leaving a server and deleting a user's data). It always requires the bearer token and acts for the Discord user named in `X-Discord-User`; the bot checks that user rights in each server itself. Anyone who holds `STATS_TOKEN` can act as any user, so keep it secret and expose the port only through a tunnel or reverse proxy.

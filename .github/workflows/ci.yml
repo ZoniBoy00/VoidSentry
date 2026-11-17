@@ -21,3 +21,38 @@ jobs:
       - run: yarn install --frozen-lockfile
       - run: yarn test
       - run: yarn audit --level high
+
+  database:
+    # The unit tests mock the database; this runs the migrations and every query against real servers.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ['mysql:8.4', 'mariadb:11.4']
+    services:
+      db:
+        image: ${{ matrix.image }}
+        env:
+          # Throwaway credentials for a database that only lives for this job.
+          MYSQL_ROOT_PASSWORD: ci
+          MARIADB_ROOT_PASSWORD: ci
+          MYSQL_DATABASE: voidsentry_test
+          MARIADB_DATABASE: voidsentry_test
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pci || healthcheck.sh --connect"
+          --health-interval=5s --health-timeout=5s --health-retries=30
+    env:
+      TEST_DB_HOST: 127.0.0.1
+      TEST_DB_PORT: 3306
+      TEST_DB_USER: root
+      TEST_DB_PASSWORD: ci
+      TEST_DB_NAME: voidsentry_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: corepack enable
+      - run: yarn install --frozen-lockfile
+      - run: node --test test/db.integration.test.js
