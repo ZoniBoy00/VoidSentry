@@ -43,6 +43,7 @@ const { applySettings, canPostWarning, listChannelOptions, listRoleOptions } = r
 const logger = require('./logger');
 const { createRateLimiter } = require('./rateLimit');
 const sessionRevocations = require('./sessionRevocations');
+const { liftBan } = require('./unban');
 
 const SNOWFLAKE = /^\d{17,20}$/;
 const MAX_IDS = 100;
@@ -356,17 +357,16 @@ function createDashboardApi(client, { limits = {} } = {}) {
                     const target = String(body?.userId ?? '');
                     if (!SNOWFLAKE.test(target)) return send(422, { ok: false, error: 'Invalid user ID.' });
                     try {
-                        await guild.members.unban(target, `Unbanned by dashboard user ${userId} via VoidSentry`);
+                        // An already lifted ban is the state the user wanted, so it counts as success.
+                        await liftBan(guild, target, {
+                            actorId: userId,
+                            reason: `Unbanned by dashboard user ${userId} via VoidSentry`,
+                            detail: `user ${target} unbanned`,
+                        });
                     } catch (error) {
-                        // 10026 = Unknown Ban: already lifted, which is the state the user wanted.
-                        if (error?.code !== 10026) {
-                            logger.error(`Failed to unban ${target} in guild ${guild.id} from the dashboard.`, error);
-                            return send(422, { ok: false, error: 'Could not unban. Check that VoidSentry has the Ban Members permission.' });
-                        }
+                        logger.error(`Failed to unban ${target} in guild ${guild.id} from the dashboard.`, error);
+                        return send(422, { ok: false, error: 'Could not unban. Check that VoidSentry has the Ban Members permission.' });
                     }
-                    const detail = `user ${target} unbanned`;
-                    await db.addAudit({ guildId: guild.id, userId, detail })
-                        .catch(error => logger.error('Could not write the audit log entry.', error));
                     logger.info(`Dashboard: ${userId} unbanned ${target} in ${guild.name} (${guild.id}).`);
                     return send(200, { ok: true });
                 }

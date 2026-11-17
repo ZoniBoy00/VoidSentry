@@ -9,8 +9,8 @@
 
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 
-const { recordAudit } = require('../utils/audit');
 const logger = require('../utils/logger');
+const { liftBan } = require('../utils/unban');
 
 /** Regex to validate Discord snowflake IDs (17-19 digits) */
 const DISCORD_ID_REGEX = /^\d{17,19}$/;
@@ -44,15 +44,17 @@ module.exports = {
         await interaction.deferReply({ flags: [MessageFlags.Ephemeral] });
 
         try {
-            await interaction.guild.members.unban(userId, `Unbanned by ${interaction.user.tag} (${interaction.user.id}) via VoidSentry`);
-            logger.info(`${interaction.user.tag} unbanned ${userId} in ${interaction.guild.name}.`);
-            recordAudit(interaction.guild.id, interaction.user.id, `user ${userId} unbanned (with /unban)`);
-            await interaction.editReply({ content: `✅ User \`${userId}\` has been unbanned.` });
-        } catch (error) {
-            // 10026 = Unknown Ban
-            if (error?.code === 10026) {
+            const result = await liftBan(interaction.guild, userId, {
+                actorId: interaction.user.id,
+                reason: `Unbanned by ${interaction.user.tag} (${interaction.user.id}) via VoidSentry`,
+                detail: `user ${userId} unbanned (with /unban)`,
+            });
+            if (result === 'not-banned') {
                 return interaction.editReply({ content: `ℹ️ User \`${userId}\` is not banned on this server.` });
             }
+            logger.info(`${interaction.user.tag} unbanned ${userId} in ${interaction.guild.name}.`);
+            await interaction.editReply({ content: `✅ User \`${userId}\` has been unbanned.` });
+        } catch (error) {
             logger.error(`Failed to unban ${userId} in guild ${interaction.guild.id}.`, error);
             await interaction.editReply({ content: '❌ Failed to unban. Check that I have the **Ban Members** permission.' });
         }

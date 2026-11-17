@@ -9,9 +9,9 @@
 
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } = require('discord.js');
 
-const { recordAudit } = require('./audit');
 const logger = require('./logger');
 const { hasAdminPermission } = require('./permissions');
+const { liftBan } = require('./unban');
 
 /** Prefix of the button's custom ID; the user ID follows it. */
 const UNBAN_PREFIX = 'unban:';
@@ -63,15 +63,16 @@ async function handleUnbanButton(interaction) {
     }
 
     try {
-        await interaction.guild.members.unban(userId, `Unbanned by ${interaction.user.tag} (${interaction.user.id}) via VoidSentry`);
-        logger.info(`${interaction.user.tag} unbanned ${userId} in ${interaction.guild.name} from the log button.`);
-        recordAudit(interaction.guild.id, interaction.user.id, `user ${userId} unbanned (with the log button)`);
+        // If someone already lifted it, just show the final state.
+        const result = await liftBan(interaction.guild, userId, {
+            actorId: interaction.user.id,
+            reason: `Unbanned by ${interaction.user.tag} (${interaction.user.id}) via VoidSentry`,
+            detail: `user ${userId} unbanned (with the log button)`,
+        });
+        if (result === 'unbanned') logger.info(`${interaction.user.tag} unbanned ${userId} in ${interaction.guild.name} from the log button.`);
     } catch (error) {
-        // 10026 = Unknown Ban: someone already lifted it, so just show the final state.
-        if (error?.code !== 10026) {
-            logger.error(`Failed to unban ${userId} in guild ${interaction.guild.id} from the log button.`, error);
-            return ephemeral('❌ Failed to unban. Check that I have the **Ban Members** permission.');
-        }
+        logger.error(`Failed to unban ${userId} in guild ${interaction.guild.id} from the log button.`, error);
+        return ephemeral('❌ Failed to unban. Check that I have the **Ban Members** permission.');
     }
 
     await interaction.update({ components: [createUnbannedRow(interaction.user.username)] });

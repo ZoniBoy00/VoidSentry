@@ -353,7 +353,8 @@ test('unban treats an already lifted ban as success and reports other failures',
     audits.length = 0;
     unbanError = Object.assign(new Error('Unknown Ban'), { code: 10026 });
     assert.equal((await request(server, `/api/guilds/${GUILD}/unban`, { method: 'POST', body: { userId: '77777777777777777' } })).status, 200);
-    assert.equal(audits.length, 1);
+    // Nothing changed, so nothing goes into the change log.
+    assert.equal(audits.length, 0);
 
     audits.length = 0;
     unbanError = Object.assign(new Error('Missing Permissions'), { code: 50013 });
