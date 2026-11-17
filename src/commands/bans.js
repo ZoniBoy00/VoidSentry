@@ -12,7 +12,8 @@ const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js'
 const CONFIG = require('../config');
 const db = require('../utils/db');
 const { COLORS, LOGO_URL, BRAND_LOGGING } = require('../utils/constants');
-const { formatTimestamp, sanitizeEmbedText } = require('../utils/helpers');
+const { createLogoAttachment, formatTimestamp, sanitizeEmbedText } = require('../utils/helpers');
+const logger = require('../utils/logger');
 
 const DISCORD_ID_REGEX = /^\d{17,19}$/;
 
@@ -102,9 +103,10 @@ module.exports = {
             embed.addFields(fields);
             embed.setFooter({ text: `${BRAND_LOGGING} • ${bans.length} bans shown`, iconURL: LOGO_URL });
 
-            await interaction.reply({ embeds: [embed], flags: [MessageFlags.Ephemeral] });
+            await interaction.reply({ embeds: [embed], files: [createLogoAttachment()], flags: [MessageFlags.Ephemeral] });
         } catch (err) {
-            await interaction.reply({ content: '❌ Failed to fetch bans.', flags: [MessageFlags.Ephemeral] });
+            logger.error('/bans recent failed:', err);
+            await interaction.reply({ content: '❌ Failed to fetch bans.', flags: [MessageFlags.Ephemeral] }).catch(() => {});
         }
     },
 
@@ -154,9 +156,10 @@ module.exports = {
                 embed.setFooter({ text: BRAND_LOGGING, iconURL: LOGO_URL });
             }
 
-            await interaction.reply({ embeds: [embed], flags: [MessageFlags.Ephemeral] });
+            await interaction.reply({ embeds: [embed], files: [createLogoAttachment()], flags: [MessageFlags.Ephemeral] });
         } catch (err) {
-            await interaction.reply({ content: '❌ Failed to search bans.', flags: [MessageFlags.Ephemeral] });
+            logger.error('/bans search failed:', err);
+            await interaction.reply({ content: '❌ Failed to search bans.', flags: [MessageFlags.Ephemeral] }).catch(() => {});
         }
     },
 
@@ -192,9 +195,10 @@ module.exports = {
 
             embed.setFooter({ text: BRAND_LOGGING, iconURL: LOGO_URL });
 
-            await interaction.reply({ embeds: [embed], flags: [MessageFlags.Ephemeral] });
+            await interaction.reply({ embeds: [embed], files: [createLogoAttachment()], flags: [MessageFlags.Ephemeral] });
         } catch (err) {
-            await interaction.reply({ content: '❌ Failed to fetch statistics.', flags: [MessageFlags.Ephemeral] });
+            logger.error('/bans stats failed:', err);
+            await interaction.reply({ content: '❌ Failed to fetch statistics.', flags: [MessageFlags.Ephemeral] }).catch(() => {});
         }
     },
 };

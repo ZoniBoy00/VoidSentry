@@ -9,11 +9,13 @@ Object.assign(process.env, {
   DB_HOST: '127.0.0.1',
   DB_PORT: '3306',
   DB_USER: 'voidsentry_test',
-  DB_PASSWORD: 'test-password',
+  DB_PASSWORD: 'mocked',
   DB_NAME: 'voidsentry_test',
   NODE_ENV: 'production',
 });
 
+const helpers = require('../src/utils/helpers');
+helpers.createLogoAttachment = () => ({ name: 'logo.png' });
 const db = require('../src/utils/db');
 const bansCommand = require('../src/commands/bans');
 
@@ -73,4 +75,12 @@ test('only the bot owner can use global scope', async () => {
   await bansCommand.execute(owner.interaction);
 
   assert.deepEqual(seen, [GUILD_ID, null]);
+});
+
+test('/bans replies attach the logo their embeds point at', async () => {
+  db.getBans = async () => [{ user_id: '12345678901234569', user_tag: 'spammer', guild_name: 'Server', channel_name: 'trap', created_at: new Date() }];
+  const { interaction, calls } = makeInteraction({ subcommand: 'recent', userId: '999999999999999999' });
+  await bansCommand.execute(interaction);
+  assert.ok(calls.reply.embeds, 'expected an embed, got: ' + JSON.stringify(calls.reply));
+  assert.deepEqual(calls.reply.files, [{ name: 'logo.png' }]);
 });
