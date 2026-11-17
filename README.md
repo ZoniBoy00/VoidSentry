@@ -28,7 +28,7 @@ A high-performance Discord security bot designed to catch and remove self-bots a
   - `/add-logchannel [channel]` — Choose where ban logs are posted on this server (any channel, any name)
   - `/remove-logchannel` — Stop posting ban logs
   - `/unban` — Unban a user by ID (ban history is kept)
-  - `/purge-user` — Bot owner only: delete all stored ban records of a user (data deletion requests)
+  - `/purge-user` — Bot owner only: delete all stored ban records and appeals of a user (data deletion requests)
   - `/status` — View bot uptime, statistics, and recent bans
   - `/ban-info` — Look up ban information for a user by ID (Discord ban lookup)
   - `/bans` — Ban history from database:
@@ -39,6 +39,7 @@ A high-performance Discord security bot designed to catch and remove self-bots a
 - **Unban from the log** — Every ban log has an Unban button for administrators.
 - **Change log** — Every settings change and unban (from a command, the log button or the dashboard) is recorded with who made it, in the `audit_log` table.
 - **Owner alerts** — When the bot cannot ban on a server (missing permission, role too low), the server owner gets at most one direct message a day about it.
+- **Ban appeals (opt-in, needs the website)** — A server can turn appeals on from the dashboard. A banned person then signs in on the website with Discord and appeals; moderators get a post in the log channel with **Approve and unban** and **Deny** buttons (Deny asks for an optional reply), the owner gets at most one DM a day, and the dashboard lists open and decided appeals. One open appeal per server, a wait after a denial (7 days by default, adjustable), a per-server block list, rate limits, and decided appeals are deleted after 90 days. The warning in trap channels and the ban DM mention the appeal form only on servers that accept appeals.
 - **Optional web dashboard** — The hosted bot at [voidsentry.vercel.app](https://voidsentry.vercel.app) has a dashboard for settings, ban history, statistics, unbans and CSV export. Its website is not open source; the API it uses is in this repository and switched off unless you configure it. Self-hosted bots are fully usable with slash commands alone (see [Running without the dashboard](#running-without-the-dashboard)).
 - **Live Status** — The bot's "Watching" status rotates between your `STATUS_TEXT`, the number of servers and the total number of users banned.
 - **Structured Logging** — Pino-based logger with categories (system, security, ban, detection, command)
@@ -139,6 +140,7 @@ Copy `.env.example` to `.env` and fill in your credentials:
 | `DELETE_MESSAGE_SECONDS` | Default messages to delete on ban (default: 86400 = 24h). Servers can override it. |
 | `BAN_REASON` | Default ban reason. Servers can override it. |
 | `SUPPORT_URL` | Optional. Support link shown by `/help` (default: this repository's [GitHub Discussions](https://github.com/ZoniBoy00/VoidSentry/discussions)). |
+| `APPEALS_URL` | Optional. Address of the appeal form named in the trap warning and the ban DM on servers with appeals on (default: `https://voidsentry.vercel.app/appeal`). |
 | `STATS_PORT` | Optional. Port of a read-only JSON endpoint (`GET /stats`) with aggregate numbers (servers, members, total bans, bans in the last 7 days) for the website. `0` or empty = disabled. |
 | `STATS_HOST` | Interface for the stats endpoint (default `127.0.0.1`). Keep it on localhost and expose it through a tunnel or reverse proxy. |
 | `STATS_TOKEN` | Optional bearer token the stats endpoint requires. Use a random value of at least 32 characters (for example `openssl rand -hex 32`); the bot logs a warning at start-up if it is shorter. |
@@ -204,7 +206,7 @@ and the configured user only needs access to that database.
 | `/trap-settings exempt-add <role>` | Never ban members with this role | Owner / Administrator |
 | `/trap-settings exempt-remove <role>` | Remove a role exemption | Owner / Administrator |
 | `/unban <user_id>` | Unban a user on this server | Owner / Administrator |
-| `/purge-user <user_id>` | Delete all stored ban records of a user on every server | Bot owner only |
+| `/purge-user <user_id>` | Delete all stored ban records and appeals of a user on every server | Bot owner only |
 | `/status` | Bot uptime, stats, ping, recent bans | Owner / Administrator |
 | `/ban-info` | Look up Discord ban by user ID | Owner / Administrator |
 | `/bans recent [limit]` | Recent bans from database | Owner / Administrator |
@@ -245,7 +247,7 @@ When a user is banned, the log embed includes:
 
 - **Message Content Intent**: Must be enabled in Discord Developer Portal → Bot → Privileged Intents.
 - **Database**: MySQL is required. The database must exist; its tables are created on first run.
-- **No Appeals**: The bot uses a "zero-tolerance" policy. Anyone typing in the trap channel is banned immediately.
+- **Zero tolerance**: Anyone typing in the trap channel is banned immediately. Appeals are off unless a server turns them on in the dashboard; they are decided by the server's own moderators.
 - **Message Purge**: The banned user's recent messages are deleted (24 hours by default).
 - **Docker**: A `Dockerfile` is included. The bot exits on uncaught exceptions, so run it with a restart policy (`docker run --restart unless-stopped --env-file .env voidsentry`).
 - **DM Notification**: Best-effort, fails silently if user has DMs disabled.
@@ -280,7 +282,9 @@ CREATE TABLE guild_settings (
     log_channel_id VARCHAR(20) NULL,
     ban_reason VARCHAR(500) NULL,
     delete_message_seconds INT NULL,
-    dry_run TINYINT(1) NULL
+    dry_run TINYINT(1) NULL,
+    appeals_enabled TINYINT(1) NULL,      -- migration 4; NULL = off
+    appeal_cooldown_days INT NULL         -- migration 4; NULL = 7 days
 );
 
 CREATE TABLE trap_channels (
@@ -296,7 +300,7 @@ CREATE TABLE exempt_roles (
 );
 ```
 
-Also created by migrations: `audit_log` (who changed which setting or lifted which ban, and when), `session_revocations` (dashboard "sign out everywhere") and `schema_migrations` (which migrations have run). `src/utils/migrations.js` has the exact definitions.
+Also created by migrations: `audit_log` (who changed which setting or lifted which ban, and when), `session_revocations` (dashboard "sign out everywhere"), `appeals` and `appeal_blocks` (ban appeals and who may not appeal on a server) and `schema_migrations` (which migrations have run). `src/utils/migrations.js` has the exact definitions.
 
 ## Running without the dashboard
 
@@ -307,7 +311,7 @@ The dashboard API is never served unless you set both `STATS_PORT` and `STATS_TO
 - Leave `STATS_PORT` empty (or `0`). No HTTP port is opened at all.
 - Or, to publish only the aggregate `/stats` numbers (for your own status page or monitoring), set `STATS_PORT` and optionally `STATS_TOKEN`, and set `DASHBOARD_API=false`. Then `/api/*` answers `404` even with a valid token.
 
-The dashboard tables (`audit_log`, `session_revocations`) are still created; they stay small and unused apart from the change log.
+The dashboard tables (`audit_log`, `session_revocations`, `appeals`, `appeal_blocks`) are still created; they stay small and unused apart from the change log. Appeals need the website's sign-in and form, so they stay off on a bot without the dashboard.
 
 ## Backups and migrations
 
