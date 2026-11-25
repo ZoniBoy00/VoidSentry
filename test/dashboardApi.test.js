@@ -311,6 +311,26 @@ test('filing an appeal acts for the header user and has its own rate limit', asy
   });
 });
 
+test('appeals that cannot be filed do not use up the shared hourly budget', async () => {
+  const appeals = require('../src/utils/appeals');
+  const eligible = new Set([ADMIN, MEMBER]);
+  appeals.submitAppeal = async (_client, request) => (
+    eligible.has(request.userId) ? { ok: true, appeal: { id: 1 } } : { ok: false, error: 'VoidSentry has no ban of yours on this server.' }
+  );
+  const file = (server, user) => request(server, '/api/appeals', { user, method: 'POST', body: { guildId: GUILD, text: 'It was my cat.' } });
+  await withServer({ token: TOKEN, limits: { appealsPerUser: 10, appealsTotal: 2 } }, async server => {
+    // Accounts without a ban try again and again; none of it counts against everyone else.
+    for (let i = 0; i < 6; i += 1) {
+      const nobody = `7000000000000000${i}`;
+      assert.equal((await file(server, nobody)).status, 422);
+    }
+    assert.equal((await file(server, ADMIN)).status, 200);
+    assert.equal((await file(server, MEMBER)).status, 200);
+    // Two appeals were filed, so the budget is used up for everyone until the hour is over.
+    assert.equal((await file(server, SERVER_OWNER)).status, 429);
+  });
+});
+
 test('only people who may manage the server can list and decide its appeals', async () => {
   const appeals = require('../src/utils/appeals');
   const decided = [];

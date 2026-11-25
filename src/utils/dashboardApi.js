@@ -71,9 +71,15 @@ const STATS_DAYS = 30;
  * four, so a person clicking around stays far below the per-user limit.
  * Searches hit the database hardest and have their own, lower limit.
  */
-const DEFAULT_LIMITS = { perUser: 120, searchesPerUser: 20, total: 1200, windowMs: 60 * 1000 };
+const DEFAULT_LIMITS = {
+    perUser: 120, searchesPerUser: 20, total: 1200, windowMs: 60 * 1000,
+    appealsPerUser: 5, appealsTotal: 200,
+};
 
-/** New appeals per person and in total each hour; one open appeal per server is enforced separately. */
+/**
+ * New appeals per person and in total each hour; one open appeal per server is enforced separately.
+ * The total counts appeals that were filed, not attempts, so people who cannot appeal cannot use it up.
+ */
 const APPEAL_LIMITS = { perUser: 5, total: 200, windowMs: 60 * 60 * 1000 };
 
 /**
@@ -245,12 +251,12 @@ function readJson(req) {
  * @returns {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, url: URL) => Promise<void>}
  */
 function createDashboardApi(client, { limits = {} } = {}) {
-    const { perUser, searchesPerUser, total, windowMs } = { ...DEFAULT_LIMITS, ...limits };
+    const { perUser, searchesPerUser, total, windowMs, appealsPerUser, appealsTotal } = { ...DEFAULT_LIMITS, ...limits };
     const userLimiter = createRateLimiter({ limit: perUser, windowMs });
     const searchLimiter = createRateLimiter({ limit: searchesPerUser, windowMs });
     const totalLimiter = createRateLimiter({ limit: total, windowMs });
-    const appealUserLimiter = createRateLimiter({ limit: APPEAL_LIMITS.perUser, windowMs: APPEAL_LIMITS.windowMs });
-    const appealTotalLimiter = createRateLimiter({ limit: APPEAL_LIMITS.total, windowMs: APPEAL_LIMITS.windowMs });
+    const appealUserLimiter = createRateLimiter({ limit: appealsPerUser, windowMs: APPEAL_LIMITS.windowMs });
+    const appealTotalLimiter = createRateLimiter({ limit: appealsTotal, windowMs: APPEAL_LIMITS.windowMs });
 
     return async function handle(req, res, url) {
         const send = (status, body) => {
@@ -294,10 +300,11 @@ function createDashboardApi(client, { limits = {} } = {}) {
                 const body = await readJson(req);
                 const guildId = String(body?.guildId ?? '');
                 if (!SNOWFLAKE.test(guildId)) return send(422, { ok: false, error: 'Choose a server.' });
-                const allowed = [appealUserLimiter.hit(userId), appealTotalLimiter.hit('all')];
-                if (allowed.includes(false)) return send(429, { error: 'too many requests' });
+                // Only appeals that are filed use up the shared budget, so an account with no ban cannot lock others out.
+                if (!appealUserLimiter.hit(userId) || appealTotalLimiter.isFull('all')) return send(429, { error: 'too many requests' });
                 const user = await client.users.fetch(userId).catch(() => null);
                 const result = await appeals.submitAppeal(client, { userId, userTag: user?.username ?? userId, guildId, text: body?.text });
+                if (result.ok) appealTotalLimiter.hit('all');
                 return send(result.ok ? 200 : 422, result);
             }
 

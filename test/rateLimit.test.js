@@ -20,3 +20,17 @@ test('a new window starts with fresh counters', () => {
   time = 1000;
   assert.equal(limiter.hit('a'), true);
 });
+
+test('isFull reports a used-up key without counting anything', () => {
+  let time = 0;
+  const limiter = createRateLimiter({ limit: 2, windowMs: 1000, now: () => time });
+  assert.equal(limiter.isFull('a'), false);
+  assert.equal(limiter.isFull('a'), false, 'asking does not use up the limit');
+  limiter.hit('a');
+  assert.equal(limiter.isFull('a'), false);
+  limiter.hit('a');
+  assert.equal(limiter.isFull('a'), true);
+  assert.equal(limiter.isFull('b'), false, 'keys are checked separately');
+  time = 1000;
+  assert.equal(limiter.isFull('a'), false, 'a new window starts empty');
+});
